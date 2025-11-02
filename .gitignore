@@ -35,7 +35,7 @@ uv_env/
 # ==============================
 build/
 dist/
-# *.egg-info/
+*.egg-info/
 *.egg
 *.whl
 pip-wheel-metadata/
