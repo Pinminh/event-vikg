@@ -1,0 +1,134 @@
+# ==============================
+# OS / environment files
+# ==============================
+# macOS
+.DS_Store
+# Windows
+Thumbs.db
+ehthumbs.db
+# general
+desktop.ini
+
+# ==============================
+# Python bytecode / caches
+# ==============================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ==============================
+# Virtual environments / package manager artifacts
+# ==============================
+# If you use a virtualenv folder named venv, env, etc:
+venv/
+env/
+ENV/
+.venv/
+# If your “uv” tool creates a local folder, you may add it:
+uv_env/
+# If you install dependencies into a folder such as .venv or .uv or whatever:
+.uv/
+# (Adjust above names to match your tool’s actual folder, if any.)
+
+# ==============================
+# Distribution / build / packaging
+# ==============================
+build/
+dist/
+# *.egg-info/
+*.egg
+*.whl
+pip-wheel-metadata/
+wheels/
+# If your packaging tool creates a folder like “.uvbuild” adjust accordingly.
+
+# ==============================
+# Logs, coverage, test outputs
+# ==============================
+*.log
+logs/
+htmlcov/
+.coverage
+.coverage.*
+.cache
+.nox/
+.tox/
+.pytest_cache/
+coverage.xml
+nosetests.xml
+*.cover
+
+# ==============================
+# IDE / editor settings
+# ==============================
+.vscode/
+# If other editors used:
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ==============================
+# Jupyter / notebook / interactive
+# ==============================
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ==============================
+# Data, output, results directories
+# ==============================
+output/
+results/
+data/
+# If you have subfolders inside data that you *do* want to commit, you might 
+# instead exclude data/ but whitelist a subfolder — e.g.:
+# !data/schema/
+# !data/readme.md
+
+# ==============================
+# Configuration / secrets / credentials
+# ==============================
+# Your config.toml has API keys, so ignore it:
+config.toml
+# If you use a .env file or credentials file:
+.env
+.env.* 
+# Other secret files:
+secrets.json
+*.key
+*.pem
+
+# ==============================
+# Database / storage / generated files
+# ==============================
+*.sqlite
+*.sqlite3
+*.db
+dump.rdb
+*.h5
+# If you generate any files, e.g., graphs, models, large binaries:
+models/
+*.model
+*.pt
+*.ckpt
+
+# ==============================
+# Miscellaneous generated / system files
+# ==============================
+# Python C extensions
+*.so
+# compiled SWIG wrappers etc
+*.pyd
+# Manifest / spec
+*.manifest
+*.spec
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ==============================
+# Negations (exceptions) if needed
+# ==============================
+# If you want to include specific files inside excluded folders, you can use ! pattern
+# For example:
+# !data/important_readme.md
+

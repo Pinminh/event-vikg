@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: ai-knowledge-graph
+Version: 0.6.1
+Summary: Takes a text document and generates an interactive knowledge graph
+Author-email: Robert McDermott <robert.c.mcdermott@gmail.com>
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: networkx>=3.4.2
+Requires-Dist: pyvis>=0.3.2
+Requires-Dist: pyvis-network>=0.0.6
+Requires-Dist: requests>=2.32.3
+Requires-Dist: tomli>=2.2.1
+Requires-Dist: python-louvain>=0.16

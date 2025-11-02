@@ -1,0 +1,2 @@
+[console_scripts]
+generate-graph = src.knowledge_graph.main:main

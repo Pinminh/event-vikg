@@ -1,0 +1,6 @@
+networkx>=3.4.2
+pyvis>=0.3.2
+pyvis-network>=0.0.6
+requests>=2.32.3
+tomli>=2.2.1
+python-louvain>=0.16
