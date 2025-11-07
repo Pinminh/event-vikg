@@ -1,9 +1,0 @@
-data
-generate_graph
-knowledge_graph
-myenv
-myenv_new
-open_json
-output
-results
-retrieve_relevant
