@@ -1,23 +1,45 @@
 """
 Knowledge Graph Generator and Visualizer main module.
 """
-import argparse
-import json
 import os
-import sys
 import re
+import sys
+import json
+import time
+import random
+import argparse
 
 # Add the parent directory to the Python path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.knowledge_graph.config import load_config
-from src.knowledge_graph.llm import call_llm, extract_json_from_text
-from src.knowledge_graph.visualization import visualize_knowledge_graph, sample_data_visualization
-from src.knowledge_graph.text_utils import chunk_text
-from src.knowledge_graph.entity_standardization import standardize_entities, infer_relationships, limit_predicate_length
-from src.knowledge_graph.prompts import MAIN_SYSTEM_PROMPT, MAIN_USER_PROMPT
-from src.knowledge_graph.prompts import CLAIM_EXTRACTION_SYSTEM_PROMPT, get_claim_extraction_user_prompt
-from src.knowledge_graph.prompts import PREKG_ENTITY_RESOLUTION_SYSTEM_PROMPT, get_prekg_entity_resolution_user_prompt
+from knowledge_graph.llm import LLM
+from knowledge_graph.config import load_config
+from knowledge_graph.visualization import visualize_knowledge_graph, sample_data_visualization
+from knowledge_graph.text_utils import chunk_text
+
+from knowledge_graph.entity_standardization import (
+    standardize_entities,
+    infer_relationships,
+    limit_predicate_length,
+)
+
+from knowledge_graph.prompts import (
+    # Pre-KG resolution
+    PREKG_ENTITY_RESOLUTION_SYSTEM_PROMPT,
+    get_prekg_entity_resolution_user_prompt,
+    # Claim extraction
+    CLAIM_EXTRACTION_SYSTEM_PROMPT,
+    get_claim_extraction_user_prompt,
+)
+
+from knowledge_graph.event_extraction import (
+    get_events_from_claims,                 # Event identification
+    get_event_stats,                        # Used for logging
+    infer_within_chunk_event_relations,     # Within-chunk event relation
+    get_entity_relations,                   # Entity relations from events
+    resolve_events_with_llm,                # Event resolution
+    infer_event_relationships               # Event inference
+)
 
 def process_with_llm(config, input_text, debug=False):
     """
@@ -33,69 +55,41 @@ def process_with_llm(config, input_text, debug=False):
     """
     
     # LLM configuration
-    model = config["llm"]["model"]
-    api_key = config["llm"]["api_key"]
-    max_tokens = config["llm"]["max_tokens"]
-    temperature = config["llm"]["temperature"]
-    base_url = config["llm"]["base_url"]
+    llm = LLM(config)
     
-    # Use prompts from the prompts module
-    system_prompt = MAIN_SYSTEM_PROMPT
-    user_prompt = MAIN_USER_PROMPT
-    
-    import time
-    import random
-    
-    # Entity resolution + Entity filling
-    prekg_resolution_system_prompt = PREKG_ENTITY_RESOLUTION_SYSTEM_PROMPT
-    prekg_resolution_user_prompt = get_prekg_entity_resolution_user_prompt(input_text)
-    prekg_response = call_llm(model, prekg_resolution_user_prompt, api_key, prekg_resolution_system_prompt, max_tokens, temperature, base_url)
+    # Pre-KG resolution
+    prekg_text = llm(
+        PREKG_ENTITY_RESOLUTION_SYSTEM_PROMPT,
+        get_prekg_entity_resolution_user_prompt(input_text),
+    )
     
     # Claim extraction
-    claim_system_prompt = CLAIM_EXTRACTION_SYSTEM_PROMPT
-    claim_user_prompt = get_claim_extraction_user_prompt(prekg_response)
-    extracting_claims_response = call_llm(model, claim_user_prompt, api_key, claim_system_prompt, max_tokens, temperature, base_url)
+    text_claims = llm(
+        CLAIM_EXTRACTION_SYSTEM_PROMPT,
+        get_claim_extraction_user_prompt(prekg_text),
+    )
     
-    context_claims = extracting_claims_response.split('\n')
+    context_claims = text_claims.strip().split('\n')
     print(f"📝 Extracted {len([c for c in context_claims if c])} claims from chunk")
     
     # FAST MODE: Không delay preventive, chỉ chờ khi gặp lỗi
     # Delay tối thiểu để tránh spam
     time.sleep(0.5)
+    
+    # Within-chunk event processing
+    event_triples = get_events_from_claims(context_claims, config, debug)
+    event_triples += infer_within_chunk_event_relations(event_triples, config, debug)
+    
+    estats = get_event_stats(event_triples)
+    print(f">> Extracted {estats['events']} events, {estats['participants']} entities, {estats['locations']} locations, and {estats['times']} time points.")
+    
+    # Connect entities from events
+    print(f">> Extracting entity-entity relations from {estats['participants']} entities...")
+    entity_triples = get_entity_relations(prekg_text, event_triples, context_claims, config, debug)
+    print(f">> Extracted {len(entity_triples)} entity relations.")
 
-    triples = []
+    triples = event_triples + entity_triples
     metadata = {}
-    
-    claim_index = 0
-    total_claims = len([c for c in context_claims if c])
-    
-    for i, claim in enumerate(context_claims):
-        if claim == "":
-            continue
-        
-        claim_index += 1
-        print(f"\n🔍 Processing claim {claim_index}/{total_claims}...")
-        print(claim)
-        
-        # Thêm delay giữa các API calls để tránh rate limit và server overload
-        if claim_index > 1:
-            base_delay = 5.0  # Tăng từ 4.5s lên 5s (12 req/min)
-            jitter = random.uniform(0, 1.0)  # Random 0-1s
-            time.sleep(base_delay + jitter)
-            
-        extract_triplete_prompt = user_prompt + f"```{claim}```"
-        triplets_response = call_llm(model, extract_triplete_prompt, api_key, system_prompt, max_tokens, temperature, base_url)
-        result = extract_json_from_text(triplets_response)
-        
-        if result:
-            print(f"✅ Found {len(result)} triples")
-            for item in result:
-                item["claim"] = claim
-            triples.extend(result)
-        else:
-            print(f"⚠️  No triples found")
-
-    print(triples)
     
     # Validate and filter triples to ensure they have all required fields
     valid_triples = []
@@ -140,17 +134,18 @@ def process_text_in_chunks(config, full_text, debug=False):
         List of all extracted triples from all chunks
     """
     # Get chunking parameters from config
+    already_chunked = config.get("chunking", {}).get("already_chunked", False)
     chunk_size = config.get("chunking", {}).get("chunk_size", 500)
     overlap = config.get("chunking", {}).get("overlap", 50)
     
     # Split text into chunks
-    text_chunks = chunk_text(full_text, chunk_size, overlap)
+    text_chunks = chunk_text(full_text, config)
     print(text_chunks)
-    
+    chunking_info = f"size: {chunk_size} words, overlap: {overlap} words" if not already_chunked else "pre-chunked"
     print("=" * 50)
-    print("PHASE 1: INITIAL TRIPLE EXTRACTION")
+    print("PHASE 1: INITIAL EVENT-ENTITY TRIPLE EXTRACTION")
     print("=" * 50)
-    print(f"Processing text in {len(text_chunks)} chunks (size: {chunk_size} words, overlap: {overlap} words)")
+    print(f"Processing text in {len(text_chunks)} chunks ({chunking_info})")
     print(f"⏱️  Estimated time: ~{len(text_chunks) * 2.5:.0f} minutes (due to API rate limits + server load)")
     print("⚠️  Note: Gemini API may be overloaded at peak hours, please be patient")
     print("=" * 50)
@@ -158,19 +153,25 @@ def process_text_in_chunks(config, full_text, debug=False):
     import time
     start_time = time.time()
     
-    # Process each chunk
-    latest_chunk = 13
+    # Process each chunk from specified index
+    next_chunk = config.get("next_chunk", 1)
+    os.makedirs("cumulative_output", exist_ok=True)
+    os.makedirs("output", exist_ok=True)
+    input_name = config.get("input_name", "")
     
-    with open(f"output/chunk-1-to-{latest_chunk - 1}.json", "r") as file:
-        all_results = json.load(file)
+    if next_chunk == 1:
+        all_results = []
+    else:
+        with open(f"cumulative_output/{input_name}.chunk-1-to-{next_chunk - 1}.json", "r", encoding="utf-8") as file:
+            all_results = json.load(file)
     
     for i, chunk in enumerate(text_chunks):
         chunk_start = time.time()
         print(f"\n{'='*50}")
-        print(f"📦 Processing chunk {i+1}/{len(text_chunks)} ({len(chunk.split())} words)")
+        print(f"📦 Processing chunk {i + 1}/{len(text_chunks)} ({len(chunk.split())} words)")
         print(f"{'='*50}")
         
-        if i + 1 < latest_chunk:
+        if i + 1 < next_chunk:
             continue
         
         # Process the chunk with LLM
@@ -182,6 +183,8 @@ def process_text_in_chunks(config, full_text, debug=False):
                 item["chunk"] = i + 1
             
             # Add to overall results
+            with open(f"output/{input_name}.chunk-{i + 1}.json", "w", encoding="utf-8") as file:
+                json.dump(chunk_results, file, indent=2, ensure_ascii=False)
             all_results.extend(chunk_results)
             
             chunk_time = time.time() - chunk_start
@@ -190,33 +193,40 @@ def process_text_in_chunks(config, full_text, debug=False):
             remaining_chunks = len(text_chunks) - (i + 1)
             eta = avg_time_per_chunk * remaining_chunks
             
-            print(f"✅ Chunk {i+1} completed: {len(chunk_results)} triples extracted")
+            print(f"✅ Chunk {i + 1} completed: {len(chunk_results)} triples extracted")
             print(f"⏱️  Chunk time: {chunk_time:.1f}s | Total elapsed: {elapsed_time/60:.1f}m | ETA: {eta/60:.1f}m")
             
-            with open(f"output/chunk-1-to-{i + 1}.json", "w") as file:
-                json.dump(all_results, file, indent=2)
+            with open(f"cumulative_output/{input_name}.chunk-1-to-{i + 1}.json", "w", encoding="utf-8") as file:
+                json.dump(all_results, file, indent=2, ensure_ascii=False)
         else:
-            print(f"⚠️  Warning: Failed to extract triples from chunk {i+1}")
+            print(f"⚠️  Warning: Failed to extract triples from chunk {i + 1}")
     
     print(f"\nExtracted a total of {len(all_results)} triples from all chunks")
     
     # Apply entity standardization if enabled
     if config.get("standardization", {}).get("enabled", False):
         print("Standardization is enabled", config.get("standardization", {}).get("enabled", False))
+        
         print("\n" + "="*50)
-        print("PHASE 2: ENTITY STANDARDIZATION")
+        print("PHASE 2A: EVENT STANDARDIZATION")
         print("="*50)
-        print(f"Starting with {len(all_results)} triples and {len(get_unique_entities(all_results))} unique entities")
+        print(f"Starting with {len(all_results)} triples and {len(get_unique_entities(all_results))} unique names")
+        all_results = resolve_events_with_llm(all_results, config)
+        print(f"After standardization: {len(all_results)} triples and {len(get_unique_entities(all_results))} unique names")
         
+        print("\n" + "="*50)
+        print("PHASE 2B: ENTITY STANDARDIZATION")
+        print("="*50)
+        print(f"Starting with {len(all_results)} triples and {len(get_unique_entities(all_results))} unique names")
         all_results = standardize_entities(all_results, config)
-        
-        print(f"After standardization: {len(all_results)} triples and {len(get_unique_entities(all_results))} unique entities")
+        print(f"After standardization: {len(all_results)} triples and {len(get_unique_entities(all_results))} unique names")
     
     # Apply relationship inference if enabled
     if config.get("inference", {}).get("enabled", False):
         print("Inference is enabled", config.get("inference", {}).get("enabled", False))
+        
         print("\n" + "="*50)
-        print("PHASE 3: RELATIONSHIP INFERENCE")
+        print("PHASE 3A: EVENT RELATIONSHIP INFERENCE")
         print("="*50)
         print(f"Starting with {len(all_results)} triples")
         
@@ -227,7 +237,37 @@ def process_text_in_chunks(config, full_text, debug=False):
         
         print("Top 5 relationship types before inference:")
         for pred, count in sorted(relationship_counts.items(), key=lambda x: x[1], reverse=True)[:5]:
+            print(f" - {pred}: {count} occurrences")
+        
+        all_results = infer_event_relationships(all_results, config)
+        
+        # Count relationships after inference
+        relationship_counts_after = {}
+        for triple in all_results:
+            relationship_counts_after[triple["predicate"]] = relationship_counts_after.get(triple["predicate"], 0) + 1
+        
+        print("\nTop 5 relationship types after inference:")
+        for pred, count in sorted(relationship_counts_after.items(), key=lambda x: x[1], reverse=True)[:5]:
             print(f"  - {pred}: {count} occurrences")
+        
+        # Count inferred relationships
+        inferred_count = sum(1 for triple in all_results if triple.get("inferred", False))
+        print(f"\nAdded {inferred_count} inferred relationships")
+        print(f"Final knowledge graph: {len(all_results)} triples")
+        
+        print("\n" + "="*50)
+        print("PHASE 3B: ENTITY RELATIONSHIP INFERENCE")
+        print("="*50)
+        print(f"Starting with {len(all_results)} triples")
+        
+        # Count existing relationships
+        relationship_counts = {}
+        for triple in all_results:
+            relationship_counts[triple["predicate"]] = relationship_counts.get(triple["predicate"], 0) + 1
+        
+        print("Top 5 relationship types before inference:")
+        for pred, count in sorted(relationship_counts.items(), key=lambda x: x[1], reverse=True)[:5]:
+            print(f" - {pred}: {count} occurrences")
         
         all_results = infer_relationships(all_results, config)
         
@@ -273,11 +313,12 @@ def main():
     parser = argparse.ArgumentParser(description='Knowledge Graph Generator and Visualizer')
     parser.add_argument('--test', action='store_true', help='Generate a test visualization with sample data')
     parser.add_argument('--config', type=str, default='config.toml', help='Path to configuration file')
-    parser.add_argument('--output', type=str, default='knowledge_graph.html', help='Output HTML file path')
-    parser.add_argument('--input', type=str, required=False, help='Path to input text file (required unless --test is used)')
+    parser.add_argument('-o', '--output', type=str, default='knowledge_graph.html', help='Output HTML file path')
+    parser.add_argument('-i', '--input', type=str, required=False, help='Path to input text file (required unless --test is used)')
     parser.add_argument('--debug', action='store_true', help='Enable debug output (raw LLM responses and extracted JSON)')
     parser.add_argument('--no-standardize', action='store_true', help='Disable entity standardization')
     parser.add_argument('--no-inference', action='store_true', help='Disable relationship inference')
+    parser.add_argument('-n', '--next-chunk', type=int, default=1, help="Next chunk to be processed")
     
     args = parser.parse_args()
     
@@ -286,6 +327,7 @@ def main():
     if not config:
         print(f"Failed to load configuration from {args.config}. Exiting.")
         return
+    config["next_chunk"] = args.next_chunk
     
     # If test flag is provided, generate a sample visualization
     if args.test:
@@ -302,6 +344,10 @@ def main():
         parser.print_help()
         return
     
+    config["input_name"] = os.path.splitext(args.input)[0]
+    if not args.output:
+        args.output = f"{config['input_name']}.html"
+    
     # Override configuration settings with command line arguments
     if args.no_standardize:
         config.setdefault("standardization", {})["enabled"] = False
@@ -316,74 +362,30 @@ def main():
     except Exception as e:
         print(f"Error reading input file {args.input}: {e}")
         return
-    
-    result = process_text_in_chunks(config, input_text, args.debug)
 
-    try:
-        with open(f"response.json", 'w', encoding='utf-8') as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Saved raw knowledge graph data to response.json")
-    except Exception as e:
-        print(f"Warning: Could not save raw data to response.json: {e}")
+    result = process_text_in_chunks(config, input_text, args.debug)
     
     # Visualize the knowledge graph
-    stats = visualize_knowledge_graph(result, args.output, config=config)
+    html_output = config["input_name"] + ".html"
+    
+    # print(json.dumps(result, indent=2, ensure_ascii=False))
+    
+    stats = visualize_knowledge_graph(result, html_output, config=config)
     print("\nKnowledge Graph Statistics:")
     print(f"Nodes: {stats['nodes']}")
     print(f"Edges: {stats['edges']}")
     print(f"Communities: {stats['communities']}")
     
-    # Provide command to open the visualization in a browser
+    # # Provide command to open the visualization in a browser
     print("\nTo view the visualization, open the following file in your browser:")
-    print(f"file://{os.path.abspath(args.output)}")
+    print(f"file://{os.path.abspath(html_output)}")
     
-    out_name = args.output.split(".")[:-1]
-    out_name = ".".join(out_name) + ".json"
+    out_name = config["input_name"] + ".json"
     
     with open(out_name, "w", encoding="utf-8") as file:
-        json.dump(result, file, indent=2)
+        json.dump(result, file, indent=2, ensure_ascii=False)
     print(f"Stored JSON objects at: {out_name}")
 
-    # import pandas as pd
-    # df = pd.read_csv("data/intrinsic_vihallu.csv")
-    # i = 1
-    # for row in df.itertuples():
-    #     input_text = f"context: {row.context}\nprompt: {row.prompt}\nresponse: {row.response}"
-    #     # Process text in chunks
-    #     result = process_text_in_chunks(config, input_text, args.debug)
-        
-    #     if result:
-    #         os.makedirs(f"output/{i}", exist_ok=True)
-    #         # Save the raw data as JSON for potential reuse
-    #         context_result = [item for item in result if item.get("part") == "context"]
-    #         response_result = [item for item in result if item.get("part") == "response"]
-    #         try:
-    #             with open(f"output/{i}/context.json", 'w', encoding='utf-8') as f:
-    #                 json.dump(context_result, f, indent=2, ensure_ascii=False)
-    #             print(f"Saved raw knowledge graph data to output/{i}/context.json")
-    #         except Exception as e:
-    #             print(f"Warning: Could not save raw data to output/{i}/context.json: {e}")
 
-    #         try:
-    #             with open(f"output/{i}/response.json", 'w', encoding='utf-8') as f:
-    #                 json.dump(response_result, f, indent=2, ensure_ascii=False)
-    #             print(f"Saved raw knowledge graph data to output/{i}/response.json")
-    #         except Exception as e:
-    #             print(f"Warning: Could not save raw data to output/{i}/response.json: {e}")
-            
-    #         # Visualize the knowledge graph
-    #         # stats = visualize_knowledge_graph(result, args.output, config=config)
-    #         # print("\nKnowledge Graph Statistics:")
-    #         # print(f"Nodes: {stats['nodes']}")
-    #         # print(f"Edges: {stats['edges']}")
-    #         # print(f"Communities: {stats['communities']}")
-            
-    #         # Provide command to open the visualization in a browser
-    #         print("\nTo view the visualization, open the following file in your browser:")
-    #         print(f"file://{os.path.abspath(args.output)}")
-    #     else:
-    #         print("Knowledge graph generation failed due to errors in LLM processing.")
-    #     print('Done with', i)
-    #     i += 1
 if __name__ == "__main__":
-    main() 
+    main()
