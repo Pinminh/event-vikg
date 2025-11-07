@@ -1,427 +1,500 @@
-"""
-Event extraction and processing module for hybrid entity-event knowledge graphs.
-This module handles extraction of events, their attributes, duration, and inter-event relations.
-"""
+import json
+import time
+from pprint import pprint
+from tqdm.auto import tqdm
+from functools import reduce
+from collections import defaultdict
+from knowledge_graph.llm import LLM, extract_json_from_text
 
-from src.knowledge_graph.llm import call_llm, extract_json_from_text
-from src.knowledge_graph.event_prompts import (
-    EVENT_EXTRACTION_SYSTEM_PROMPT,
-    get_event_extraction_user_prompt,
+from knowledge_graph.event_prompts import (
+    # Event identification
+    EVENT_IDENTIFICATION_SYSTEM_PROMPT,
+    get_event_identification_user_prompt,
+    # Event attributes
     EVENT_ATTRIBUTE_SYSTEM_PROMPT,
     get_event_attribute_user_prompt,
-    EVENT_DURATION_SYSTEM_PROMPT,
-    get_event_duration_user_prompt,
-    EVENT_RELATION_SYSTEM_PROMPT,
-    get_event_relation_user_prompt
+    # Within-chunk event relations
+    WITHIN_CHUNK_EVENT_RELATION_SYSTEM_PROMPT,
+    get_within_chunk_event_relation_user_prompt,
+    # Event resolution
+    EVENT_RESOLUTION_SYSTEM_PROMPT,
+    get_event_resolution_user_prompt,
+    # Within-community event relations
+    WITHIN_COMMUNITY_EVENT_RELATION_SYSTEM_PROMPT,
+    get_within_community_event_relation_user_prompt,
+    # Between-community event relations
+    BETWEEN_COMMUNITY_EVENT_RELATION_SYSTEM_PROMPT,
+    get_between_community_event_relation_user_prompt,
+    # Entity-entity relations
+    ENTITY_RELATION_SYSTEM_PROMPT,
+    get_entity_relation_user_prompt,
 )
-import time
-import random
 
 
-def extract_events_from_claims(claims, config, debug=False):
-    """
-    Extract events from a list of claims.
+with open("config.json", "r", encoding="utf-8") as file:
+    config = json.load(file)
+
+claims = [
+    'Vào ngày 17 giờ ngày 26 tháng 4 năm 1975, tại miền Nam Việt Nam, lực lượng của Chiến dịch Hồ Chí Minh bắt đầu mở cuộc tổng công kích từ năm hướng.',
+    'Năm hướng bao gồm: Bắc (qua Bình Định – Quảng Ngãi), Tây Bắc (qua Tây Nguyên), Đông Nam (qua Sài Gòn – Gia Định), Đông (qua Cửu Long), và Tây thoại (qua vùng Tây Nam).',
+    'Cuộc tổng công kích nhằm vào chính quyền Dinh Độc Lập tại Sài Gòn.',
+    'Đúng lúc 11:30 trưa ngày 30 tháng 4 năm 1975, lá cờ Giải phóng tung bay trên nóc Dinh Độc Lập.',
+    'Sự kiện lá cờ Giải phóng tung bay trên nóc Dinh Độc Lập đánh dấu sự sụp đổ hoàn toàn chính quyền Việt Nam Cộng Hòa tại Sài Gòn.',
+    'Sự kiện lá cờ Giải phóng tung bay trên nóc Dinh Độc Lập kết thúc 30 năm chiến tranh.',
+    'Sự kiện lá cờ Giải phóng tung bay trên nóc Dinh Độc Lập chấm dứt chế độ chia cắt đất nước.',
+    'Ngày 25 tháng 4 năm 1976, trên toàn quốc diễn ra cuộc Tổng tuyển cử bầu Quốc hội khóa VI cho cả nước thống nhất.',
+    'Ngày 2 tháng 7 năm 1976 Quốc hội khóa VI quyết định đổi tên nước thành Cộng hòa xã hội chủ nghĩa Việt Nam.'
+]
+
+
+def get_events_from_claim(target_claim, context_claims, config=config, verbose=False):
+    llm = LLM(config)
+    text_events = llm(
+        EVENT_IDENTIFICATION_SYSTEM_PROMPT,
+        get_event_identification_user_prompt(target_claim, context_claims),
+    )
+    return extract_json_from_text(text_events, verbose)
+
+
+def get_event_attributes(target_events, target_claim, context_claims, config=config, verbose=False):
+    llm = LLM(config)
+    text_event_attributes = llm(
+        EVENT_ATTRIBUTE_SYSTEM_PROMPT,
+        get_event_attribute_user_prompt(target_events, target_claim, context_claims),
+    )
+    return extract_json_from_text(text_event_attributes, verbose)
+
+
+def event2triplets(event):
+    subject = "EVENT|" + event["description"]
+    objects = [f"ENTITY|{p}" for p in event["participants"]]
+    participant_triplets = [{"subject": subject, "predicate": "HAS_PARTICIPANT", "object": obj} for obj in objects]
+
+    time_triplet = [{"subject": subject, "predicate": "AT_TIME", "object": "TIME|" + event["time"]}] if event.get("time") else []
+    location_triplet = [{"subject": subject, "predicate": "AT_LOCATION", "object": "LOCATION|" + event["location"]}] if event.get("location") else []
+    return participant_triplets + time_triplet + location_triplet
+
+
+def get_events_from_claims(claims, config=config, verbose=False):
+    output_events = []
+    llm = LLM(config)
     
-    Args:
-        claims: List of claim strings
-        config: Configuration dictionary
-        debug: If True, print detailed debug information
+    for claim in tqdm(claims, desc="Events from Claims"):
+        if verbose:
+            print(f"Processing claim: {claim}")
         
-    Returns:
-        List of event dictionaries with 'event_id', 'event_type', 'description', 'participants', 'claim'
-    """
-    if not claims:
-        return []
-    
-    print(f"\n{'='*50}")
-    print("STAGE 1: EVENT EXTRACTION")
-    print(f"{'='*50}")
-    print(f"Extracting events from {len(claims)} claims...")
-    
-    # LLM configuration
-    model = config["llm"]["model"]
-    api_key = config["llm"]["api_key"]
-    max_tokens = config["llm"]["max_tokens"]
-    temperature = config["llm"]["temperature"]
-    base_url = config["llm"]["base_url"]
-    
-    all_events = []
-    event_counter = 0
-    
-    # Process claims in batches to reduce API calls
-    batch_size = config.get("event_extraction", {}).get("batch_size", 5)
-    
-    for batch_start in range(0, len(claims), batch_size):
-        batch_end = min(batch_start + batch_size, len(claims))
-        batch_claims = claims[batch_start:batch_end]
+        text_events = llm(EVENT_IDENTIFICATION_SYSTEM_PROMPT, get_event_identification_user_prompt(claim, claims))
+        events = extract_json_from_text(text_events, verbose=False)
         
-        # Join claims for batch processing
-        claims_text = "\n".join([f"{i+1}. {claim}" for i, claim in enumerate(batch_claims)])
+        if verbose:
+            print("="*50)
+            pprint(text_events)
+
+        text_attr_events = llm(EVENT_ATTRIBUTE_SYSTEM_PROMPT, get_event_attribute_user_prompt(events, claim, claims))
+        attr_events = extract_json_from_text(text_attr_events, verbose)
         
-        print(f"\n📦 Processing claims batch {batch_start//batch_size + 1}/{(len(claims)-1)//batch_size + 1}")
+        if verbose:
+            print("="*50)
+            pprint(text_attr_events)
         
-        # Add delay between batches to avoid rate limits
-        if batch_start > 0:
-            delay = random.uniform(4.0, 6.0)
-            time.sleep(delay)
+        def accumulate_triplets(acc, event):
+            triplets = event2triplets(event)
+            for triplet in triplets:
+                triplet["claim"] = claim
+            return acc + triplets
+        output_events += reduce(accumulate_triplets, attr_events, [])
+    return output_events
+
+
+def infer_within_chunk_event_relations(event_triples, config=config, verbose=False):
+    llm = LLM(config)
+    within_chunk_relations = llm(
+        WITHIN_CHUNK_EVENT_RELATION_SYSTEM_PROMPT,
+        get_within_chunk_event_relation_user_prompt(event_triples),
+    )
+    return extract_json_from_text(within_chunk_relations, verbose)
+
+
+def resolve_events_with_llm(triples, config=config, verbose=False):
+    def get_event_content(event):
+        if not event or not event.startswith("EVENT"):
+            return ""
+        return event.split("|")[1]
+
+    # Extract all unique events
+    all_events = set()
+    for triple in triples:
+        if get_event_content(triple["subject"]):
+            all_events.add(get_event_content(triple["subject"]))
+        if get_event_content(triple["object"]):
+            all_events.add(get_event_content(triple["object"]))
+
+    # If there are too many events, limit to the most frequent ones
+    event_counts = defaultdict(int)
+    for triple in triples:
+        if get_event_content(triple["subject"]):
+            event_counts[get_event_content(triple["subject"])] += 1
+        if get_event_content(triple["object"]):
+            event_counts[get_event_content(triple["object"])] += 1
+    if len(all_events) > 100:
+        # Keep only the top 100 most frequent events
+        all_events = {event for event, count in sorted(event_counts.items(), key=lambda x: -x[1])[:100]}
+
+    # Prepare triples context (limit to most relevant ones)
+    context_triples = sorted(triples, key=lambda t: event_counts[t["subject"]], reverse=True)[:200]
+    def get_event_claim(triplet):
+        claim = triplet.get("claim", "")
+        return f"(từ nhận định: {claim})" if claim else claim
+    
+    triple_texts = "\n".join([
+        f"- {t['subject']} {t['predicate']} {t['object']} {get_event_claim(t)}"
+        for t in context_triples if t["subject"] and t["object"]
+    ])
+    event_texts = "\n".join(sorted(all_events))
+
+    try:
+        # Call LLM to get event resolution mapping
+        llm = LLM(config)
+        response = llm(
+            EVENT_RESOLUTION_SYSTEM_PROMPT,
+            get_event_resolution_user_prompt(triple_texts, event_texts),
+        )
+        event_mapping = extract_json_from_text(response)
+        print("Event mapping from LLM:")
+        for standard, variants in event_mapping.items():
+            print(f"- '{standard}': {variants}")
+
+        if event_mapping and isinstance(event_mapping, dict):
+            # Apply the mapping to standardize events
+            event_to_standard = {}
+            for standard, variants in event_mapping.items():
+                for variant in variants:
+                    event_to_standard[variant] = standard
+                # Also map the standard form to itself
+                event_to_standard[standard] = standard
+
+            # Apply standardization to triples
+            for triple in triples:
+                subj_content, obj_content = get_event_content(triple["subject"]), get_event_content(triple["object"])
+                if subj_content:
+                    triple["subject"] = "EVENT|" + event_to_standard.get(subj_content, subj_content)
+                if obj_content:
+                    triple["object"] = "EVENT|" + event_to_standard.get(obj_content, obj_content)
+
+            print(f"Applied LLM-based event standardization for {len(event_mapping)} event groups")
+        else:
+            print("Could not extract valid event mapping from LLM response")
+
+    except Exception as e:
+        print(f"Error in LLM-based event resolution: {e}")
+
+    return triples
+
+
+def build_event_graph(event_triples):
+    event_graph = defaultdict(set)
+    all_nodes = set()
+    
+    for triple in event_triples:
+        subj, obj = triple["subject"], triple["object"]
+        if subj.startswith("EVENT") and obj.startswith("EVENT"):
+            event_graph[subj].add(obj)
+            all_nodes.add(subj)
+            all_nodes.add(obj)
+    
+    return event_graph, all_nodes
+
+
+def identify_event_communities(event_graph):
+    # Get all nodes
+    all_nodes = set(event_graph.keys()).union(*[event_graph[node] for node in event_graph])
+
+    # Track visited nodes
+    visited = set()
+    communities = []
+
+    # Depth-first search to find connected components
+    def dfs(node, community):
+        visited.add(node)
+        community.add(node)
+
+        # Visit outgoing edges
+        for neighbor in event_graph.get(node, []):
+            if neighbor not in visited:
+                dfs(neighbor, community)
+
+        # Visit incoming edges (we need to check all nodes)
+        for source, targets in event_graph.items():
+            if node in targets and source not in visited:
+                dfs(source, community)
+
+    # Find all communities
+    for node in all_nodes:
+        if node not in visited:
+            community = set()
+            dfs(node, community)
+            communities.append(community)
+
+    return communities
+
+
+def infer_within_event_community_relations(triples, communities, config=config, verbose=False):
+    new_triples = []
+    
+    # Process larger communities
+    for community in sorted(communities, key=len, reverse=True)[:5]:
+        # Skip small communities
+        if len(community) < 3:
+            continue
+            
+        # Get all entities in this community
+        community_events = list(community)
         
-        # Prepare prompt
-        system_prompt = EVENT_EXTRACTION_SYSTEM_PROMPT
-        user_prompt = get_event_extraction_user_prompt(claims_text)
+        # Create an adjacency matrix to identify disconnected event pairs
+        connections = {(a, b): False for a in community_events for b in community_events if a != b}
+        
+        # Mark existing connections
+        for triple in triples:
+            if triple["subject"] in community_events and triple["object"] in community_events:
+                connections[(triple["subject"], triple["object"])] = True
+        
+        # Find disconnected pairs that might be semantically related
+        disconnected_pairs = []
+        for (a, b), connected in connections.items():
+            if not connected and a != b:  # Ensure a and b are different entities
+                # Check for potential semantic relationship (e.g., shared words)
+                a_words = set(a.lower().split())
+                b_words = set(b.lower().split())
+                shared_words = a_words.intersection(b_words)
+                
+                # If they share words or one is contained in the other, they might be related
+                if shared_words or a.lower() in b.lower() or b.lower() in a.lower():
+                    disconnected_pairs.append((a, b))
+        
+        # Limit to the most promising pairs
+        disconnected_pairs = disconnected_pairs[:10]
+        
+        if not disconnected_pairs:
+            continue
+            
+        # Get relevant context
+        context_triples = []
+        entities_of_interest = set()
+        for a, b in disconnected_pairs:
+            entities_of_interest.add(a)
+            entities_of_interest.add(b)
+            
+        for triple in triples:
+            if triple["subject"] in entities_of_interest or triple["object"] in entities_of_interest:
+                context_triples.append(triple)
+        
+        # Limit context size
+        if len(context_triples) > 50:
+            context_triples = context_triples[:50]
+            
+        # Convert triples to text for prompt
+        triples_text = "\n".join([
+            f"{t['subject']} {t['predicate']} {t['object']}"
+            for t in context_triples
+        ])
+        
+        # Create pairs text
+        pairs_text = "\n".join([f"{a} và {b}" for a, b in disconnected_pairs])
         
         try:
             # Call LLM
-            response = call_llm(model, user_prompt, api_key, system_prompt, max_tokens, temperature, base_url)
+            llm = LLM(config)
+            response = llm(
+                WITHIN_COMMUNITY_EVENT_RELATION_SYSTEM_PROMPT,
+                get_within_community_event_relation_user_prompt(pairs_text, triples_text),
+            )
+
+            # Extract JSON results
+            inferred_triples = extract_json_from_text(response, verbose)
             
-            # Extract JSON
-            events_batch = extract_json_from_text(response)
-            
-            if events_batch and isinstance(events_batch, list):
-                # Assign event IDs and add claim reference
-                for event in events_batch:
-                    if isinstance(event, dict) and "event_type" in event:
-                        event["event_id"] = f"event_{event_counter}"
-                        event_counter += 1
-                        
-                        # Map back to original claim
-                        claim_idx = event.get("claim_index", 0)
-                        if 0 <= claim_idx < len(batch_claims):
-                            event["claim"] = batch_claims[claim_idx]
-                        
-                        all_events.append(event)
+            if inferred_triples and isinstance(inferred_triples, list):
+                # Mark as inferred and add to new triples
+                for triple in inferred_triples:
+                    if "subject" in triple and "predicate" in triple and "object" in triple:
+                        # Skip self-referencing triples
+                        if triple["subject"] == triple["object"]:
+                            continue
+                        triple["inferred"] = True
+                        new_triples.append(triple)
                 
-                print(f"✅ Extracted {len(events_batch)} events from batch")
+                print(f"Inferred {len(inferred_triples)} new event relations within event communities")
             else:
-                print(f"⚠️  No events extracted from batch")
+                print("Could not extract valid inferred event relations from LLM response")
         
         except Exception as e:
-            print(f"❌ Error extracting events from batch: {e}")
+            print(f"Error in LLM-based event relation inference within event communities: {e}")
     
-    print(f"\n✅ Total events extracted: {len(all_events)}")
-    
-    if debug and all_events:
-        print("\nSample events:")
-        for event in all_events[:3]:
-            print(f"  - {event.get('event_id')}: {event.get('event_type')} - {event.get('description', '')[:80]}...")
-    
-    return all_events
+    return new_triples
 
 
-def extract_event_attributes(events, config, debug=False):
-    """
-    Extract detailed attributes (time, location) for events.
-    
-    Args:
-        events: List of event dictionaries
-        config: Configuration dictionary
-        debug: If True, print detailed debug information
-        
-    Returns:
-        List of event dictionaries enriched with 'time', 'location', and 'time_type' attributes
-    """
-    if not events:
+def infer_between_event_community_relations(triples, communities, config=config, verbose=False):
+    if len(communities) <= 1:
+        print("Only one community found, skipping LLM-based relationship inference")
         return []
-    
-    print(f"\n{'='*50}")
-    print("STAGE 2: EVENT ATTRIBUTE EXTRACTION")
-    print(f"{'='*50}")
-    print(f"Extracting attributes for {len(events)} events...")
-    
-    # LLM configuration
-    model = config["llm"]["model"]
-    api_key = config["llm"]["api_key"]
-    max_tokens = config["llm"]["max_tokens"]
-    temperature = config["llm"]["temperature"]
-    base_url = config["llm"]["base_url"]
-    
-    enriched_events = []
-    
-    # Process events individually for accurate attribute extraction
-    for i, event in enumerate(events):
-        print(f"\n🔍 Processing event {i+1}/{len(events)}: {event.get('event_id')}")
-        
-        # Add delay to avoid rate limits
-        if i > 0:
-            delay = random.uniform(4.0, 6.0)
-            time.sleep(delay)
-        
-        # Prepare event context
-        event_context = f"""
-Event ID: {event.get('event_id')}
-Event Type: {event.get('event_type')}
-Description: {event.get('description')}
-Participants: {event.get('participants', [])}
-Source Claim: {event.get('claim', '')}
-"""
-        
-        # Prepare prompt
-        system_prompt = EVENT_ATTRIBUTE_SYSTEM_PROMPT
-        user_prompt = get_event_attribute_user_prompt(event_context)
-        
-        try:
-            # Call LLM
-            response = call_llm(model, user_prompt, api_key, system_prompt, max_tokens, temperature, base_url)
-            
-            # Extract JSON
-            attributes = extract_json_from_text(response)
-            
-            if attributes and isinstance(attributes, dict):
-                # Enrich event with attributes
-                event["time"] = attributes.get("time")
-                event["location"] = attributes.get("location")
-                event["time_type"] = attributes.get("time_type", "unknown")
-                event["time_precision"] = attributes.get("time_precision", "unknown")
-                
-                print(f"✅ Extracted attributes - Time: {event['time']}, Location: {event['location']}")
-            else:
-                print(f"⚠️  No attributes extracted")
-                event["time"] = None
-                event["location"] = None
-                event["time_type"] = "unknown"
-                event["time_precision"] = "unknown"
-            
-            enriched_events.append(event)
-        
-        except Exception as e:
-            print(f"❌ Error extracting attributes: {e}")
-            event["time"] = None
-            event["location"] = None
-            event["time_type"] = "unknown"
-            event["time_precision"] = "unknown"
-            enriched_events.append(event)
-    
-    print(f"\n✅ Attributes extracted for {len(enriched_events)} events")
-    
-    return enriched_events
+
+    # Focus on the largest event communities
+    def count_events_in_community(com):
+        return len([e for e in com if e.startswith("EVENT")])
+    large_communities = sorted(communities, key=count_events_in_community, reverse=True)[:10]
+
+    # For each event pair of large communities, try to infer relationships
+    new_triples = []
+
+    for i, comm1 in enumerate(large_communities):
+        for j, comm2 in enumerate(large_communities):
+            if i >= j:
+                continue  # Skip self-comparisons and duplicates
+
+            # Select representative events from each community
+            rep1 = [e for e in list(comm1) if e.startswith("EVENT")][:min(10, len(comm1))]
+            rep2 = [e for e in list(comm2) if e.startswith("EVENT")][:min(10, len(comm2))]
+
+            # Prepare relevant existing triples for context
+            context_triples = []
+            for triple in triples:
+                if (triple["subject"] in rep1 or triple["subject"] in rep2)\
+                    or (triple["object"] in rep1 or triple["object"] in rep2):
+                    context_triples.append(triple)
+
+            # Limit context size
+            if len(context_triples) > 100:
+                context_triples = context_triples[:100]
+
+            # Convert triples to text for prompt
+            def get_event_claim(triplet):
+                claim = triplet.get("claim", "")
+                return f"(từ nhận định: {claim})" if claim else claim
+
+            triples_text = "\n".join([
+                f"{t['subject']} {t['predicate']} {t['object']} (từ nhận định: {get_event_claim(t)})"
+                for t in context_triples
+            ])
+
+            # Prepare entity lists
+            events1 = ", ".join(rep1)
+            events2 = ", ".join(rep2)
+
+            try:
+                # Call LLM
+                llm = LLM(config)
+                response = llm(
+                    BETWEEN_COMMUNITY_EVENT_RELATION_SYSTEM_PROMPT,
+                    get_between_community_event_relation_user_prompt(events1, events2, triples_text),
+                )
+
+                inferred_triples = extract_json_from_text(response, verbose)
+
+                if inferred_triples and isinstance(inferred_triples, list):
+                    # Mark as inferred and add to new triples
+                    for triple in inferred_triples:
+                        if "subject" in triple and "predicate" in triple and "object" in triple:
+                            # Skip self-referencing triples
+                            if triple["subject"] == triple["object"]:
+                                continue
+                            triple["inferred"] = True
+                            new_triples.append(triple)
+
+                    print(f"Inferred {len(new_triples)} new relationships between communities")
+                else:
+                    print("Could not extract valid inferred relationships from LLM response")
+
+            except Exception as e:
+                print(f"Error in LLM-based relationship inference: {e}")
+
+    return new_triples
 
 
-def extract_event_durations(events, config, debug=False):
-    """
-    Extract duration information for events.
+def deduplicate_triples(triples):
+    # Use tuple of (subject, predicate, object) as key
+    unique_triples = {}
     
-    Args:
-        events: List of event dictionaries with attributes
-        config: Configuration dictionary
-        debug: If True, print detailed debug information
-        
-    Returns:
-        List of duration triplets: {'event_id', 'relation_type', 'duration_value', 'reference_event'}
-    """
-    if not events:
-        return []
+    for triple in triples:
+        key = (triple["subject"], triple["predicate"], triple["object"])
+        # Keep original triples (not inferred) when duplicates exist
+        if key not in unique_triples or not triple.get("inferred", False):
+            unique_triples[key] = triple
     
-    print(f"\n{'='*50}")
-    print("STAGE 3: EVENT DURATION EXTRACTION")
-    print(f"{'='*50}")
-    print(f"Extracting duration information for {len(events)} events...")
-    
-    # LLM configuration
-    model = config["llm"]["model"]
-    api_key = config["llm"]["api_key"]
-    max_tokens = config["llm"]["max_tokens"]
-    temperature = config["llm"]["temperature"]
-    base_url = config["llm"]["base_url"]
-    
-    all_durations = []
-    
-    # Prepare events context
-    events_context = []
-    for event in events:
-        event_info = {
-            "event_id": event.get("event_id"),
-            "event_type": event.get("event_type"),
-            "description": event.get("description"),
-            "time": event.get("time"),
-            "location": event.get("location"),
-            "claim": event.get("claim")
-        }
-        events_context.append(event_info)
-    
-    # Convert to text
-    events_text = "\n".join([
-        f"{i+1}. [{e['event_id']}] {e['event_type']}: {e['description']} "
-        f"(Time: {e['time']}, Location: {e['location']})"
-        for i, e in enumerate(events_context)
-    ])
-    
-    print(f"\n🔍 Analyzing duration for all events...")
-    
-    # Add delay to avoid rate limits
-    time.sleep(random.uniform(4.0, 6.0))
-    
-    # Prepare prompt
-    system_prompt = EVENT_DURATION_SYSTEM_PROMPT
-    user_prompt = get_event_duration_user_prompt(events_text)
-    
-    try:
-        # Call LLM
-        response = call_llm(model, user_prompt, api_key, system_prompt, max_tokens, temperature, base_url)
-        
-        # Extract JSON
-        durations = extract_json_from_text(response)
-        
-        if durations and isinstance(durations, list):
-            all_durations = [d for d in durations if isinstance(d, dict) and "event_id" in d]
-            print(f"✅ Extracted {len(all_durations)} duration relations")
-        else:
-            print(f"⚠️  No duration relations extracted")
-    
-    except Exception as e:
-        print(f"❌ Error extracting durations: {e}")
-    
-    if debug and all_durations:
-        print("\nSample durations:")
-        for dur in all_durations[:3]:
-            print(f"  - {dur.get('event_id')}: {dur.get('relation_type')} - {dur.get('duration_value')}")
-    
-    return all_durations
+    return list(unique_triples.values())
 
 
-def extract_event_relations(events, config, debug=False):
-    """
-    Extract relations between events (PRECEDE, CAUSE, ENABLE, PREVENT, etc.).
+def infer_event_relationships(triples, config=config, verbose=False):
+    event_graph, _ = build_event_graph(triples)
+    communities = identify_event_communities(event_graph)
+    print(f"Identified {len(communities)} disconnected event communities in the event graph")
     
-    Args:
-        events: List of event dictionaries with attributes
-        config: Configuration dictionary
-        debug: If True, print detailed debug information
-        
-    Returns:
-        List of relation triplets: {'source_event', 'relation_type', 'target_event', 'confidence'}
-    """
-    if not events or len(events) < 2:
-        return []
+    within_inferred = infer_within_event_community_relations(triples, communities, config, verbose)
+    triples += within_inferred
+    between_inferred = infer_between_event_community_relations(triples, communities, config, verbose)
+    triples += between_inferred
     
-    print(f"\n{'='*50}")
-    print("STAGE 4: EVENT RELATION EXTRACTION")
-    print(f"{'='*50}")
-    print(f"Extracting relations between {len(events)} events...")
+    triples = deduplicate_triples(triples)
+    filtered = [triple for triple in triples if triple["subject"] != triple["object"]]
+    if len(filtered) < len(triples):
+        print(f"Removed {len(triples) - len(filtered)} self-referencing event triples")
     
-    # LLM configuration
-    model = config["llm"]["model"]
-    api_key = config["llm"]["api_key"]
-    max_tokens = config["llm"]["max_tokens"]
-    temperature = config["llm"]["temperature"]
-    base_url = config["llm"]["base_url"]
-    
-    all_relations = []
-    
-    # Prepare events context
-    events_context = []
-    for event in events:
-        event_info = {
-            "event_id": event.get("event_id"),
-            "event_type": event.get("event_type"),
-            "description": event.get("description"),
-            "participants": event.get("participants", []),
-            "time": event.get("time"),
-            "location": event.get("location"),
-            "claim": event.get("claim")
-        }
-        events_context.append(event_info)
-    
-    # Convert to text
-    events_text = "\n".join([
-        f"{i+1}. [{e['event_id']}] {e['event_type']}: {e['description']}\n"
-        f"   Participants: {', '.join(e['participants']) if e['participants'] else 'None'}\n"
-        f"   Time: {e['time']}, Location: {e['location']}\n"
-        f"   Source: \"{e['claim'][:100]}...\""
-        for i, e in enumerate(events_context)
-    ])
-    
-    print(f"\n🔍 Analyzing relations between events...")
-    
-    # Add delay to avoid rate limits
-    time.sleep(random.uniform(4.0, 6.0))
-    
-    # Prepare prompt
-    system_prompt = EVENT_RELATION_SYSTEM_PROMPT
-    user_prompt = get_event_relation_user_prompt(events_text)
-    
-    try:
-        # Call LLM
-        response = call_llm(model, user_prompt, api_key, system_prompt, max_tokens, temperature, base_url)
-        
-        # Extract JSON
-        relations = extract_json_from_text(response)
-        
-        if relations and isinstance(relations, list):
-            # Validate relations
-            valid_event_ids = {e.get("event_id") for e in events}
-            all_relations = []
-            
-            for rel in relations:
-                if isinstance(rel, dict) and "source_event" in rel and "target_event" in rel:
-                    # Check if events exist
-                    if rel["source_event"] in valid_event_ids and rel["target_event"] in valid_event_ids:
-                        # Avoid self-referencing relations
-                        if rel["source_event"] != rel["target_event"]:
-                            all_relations.append(rel)
-            
-            print(f"✅ Extracted {len(all_relations)} event relations")
-        else:
-            print(f"⚠️  No event relations extracted")
-    
-    except Exception as e:
-        print(f"❌ Error extracting event relations: {e}")
-    
-    if debug and all_relations:
-        print("\nSample event relations:")
-        for rel in all_relations[:5]:
-            print(f"  - {rel.get('source_event')} --[{rel.get('relation_type')}]--> {rel.get('target_event')}")
-    
-    return all_relations
+    print(f"Added {len(filtered) - len(triples)} inferred event relationships")
+    return filtered
 
 
-def process_event_extraction_pipeline(claims, config, debug=False):
-    """
-    Complete pipeline for event extraction: events, attributes, durations, and relations.
-    
-    Args:
-        claims: List of claim strings
-        config: Configuration dictionary
-        debug: If True, print detailed debug information
-        
-    Returns:
-        Dictionary containing:
-        - 'events': List of event dictionaries
-        - 'durations': List of duration triplets
-        - 'relations': List of relation triplets
-    """
-    print(f"\n{'='*50}")
-    print("EVENT EXTRACTION PIPELINE")
-    print(f"{'='*50}")
-    print(f"Starting event extraction from {len(claims)} claims...")
-    
-    # Stage 1: Extract events
-    events = extract_events_from_claims(claims, config, debug)
-    
-    if not events:
-        print("\n⚠️  No events extracted. Skipping remaining stages.")
-        return {
-            "events": [],
-            "durations": [],
-            "relations": []
-        }
-    
-    # Stage 2: Extract event attributes
-    events_with_attributes = extract_event_attributes(events, config, debug)
-    
-    # Stage 3: Extract event durations
-    durations = extract_event_durations(events_with_attributes, config, debug)
-    
-    # Stage 4: Extract event relations
-    relations = extract_event_relations(events_with_attributes, config, debug)
-    
-    print(f"\n{'='*50}")
-    print("EVENT EXTRACTION PIPELINE COMPLETE")
-    print(f"{'='*50}")
-    print(f"✅ Extracted {len(events_with_attributes)} events")
-    print(f"✅ Extracted {len(durations)} duration relations")
-    print(f"✅ Extracted {len(relations)} event relations")
+def get_event_stats(event_triples):
+    nodes = [t["subject"] for t in event_triples] + [t["object"] for t in event_triples]
+    nodes = list(set(nodes))
+    events = list(set([n for n in nodes if n.startswith("EVENT")]))
+    participants = list(set([n for n in nodes if n.startswith("ENTITY")]))
+    locations = list(set([n for n in nodes if n.startswith("LOCATION")]))
+    times = list(set([n for n in nodes if n.startswith("TIME")]))
     
     return {
-        "events": events_with_attributes,
-        "durations": durations,
-        "relations": relations
+        "events": len(events),
+        "participants": len(participants),
+        "locations": len(locations),
+        "times": len(times),
+        "relations": len([e for e in event_triples if e["subject"].startswith("EVENT") or e["object"].startswith("EVENT")]),
+        "has_participant": len([e for e in event_triples if e["predicate"] == "HAS_PARTICIPANT"]),
+        "at_location": len([e for e in event_triples if e["predicate"] == "AT_LOCATION"]),
+        "at_time": len([e for e in event_triples if e["predicate"] == "AT_TIME"]),
+        "precede": len([e for e in event_triples if e["predicate"] == "PRECEDE"]),
+        "co_occur": len([e for e in event_triples if e["predicate"] == "CO_OCCUR"]),
+        "cause": len([e for e in event_triples if e["predicate"] == "CAUSE"]),
     }
+
+
+def get_unique_entities(event_triples):
+    entities = [
+        t["subject"] if t["subject"].startswith("ENTITY") else t["object"]
+        for t in event_triples
+        if t["subject"].startswith("ENTITY") or t["object"].startswith("ENTITY")
+    ]
+    return list(set(entities))
+
+
+def get_entity_relations(text, events, claims, config=config, verbose=False):
+    entities = get_unique_entities(events)
+    entity_relations = []
+    llm = LLM(config)
+    
+    for _ in tqdm(range(2), desc="Entity-Entity Relations"):
+        if len(entities) < 1:
+            break
+        
+        if verbose:
+            print(f"Remaining {len(entities)} entities to process...")
+        
+        text_entity_relations = llm(
+            ENTITY_RELATION_SYSTEM_PROMPT,
+            get_entity_relation_user_prompt(text, entities, claims),
+        )
+        entity_relations += extract_json_from_text(text_entity_relations, verbose)
+        
+        if verbose:
+            print(f"Extracted {len(entity_relations)} entity relations so far.")
+        
+        new_entities = get_unique_entities(entity_relations)
+        entities = list(set(entities) - set(new_entities))
+    
+    return entity_relations
