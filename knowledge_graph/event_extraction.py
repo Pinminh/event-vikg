@@ -31,23 +31,7 @@ from knowledge_graph.event_prompts import (
 )
 
 
-with open("config.json", "r", encoding="utf-8") as file:
-    config = json.load(file)
-
-claims = [
-    'Vào ngày 17 giờ ngày 26 tháng 4 năm 1975, tại miền Nam Việt Nam, lực lượng của Chiến dịch Hồ Chí Minh bắt đầu mở cuộc tổng công kích từ năm hướng.',
-    'Năm hướng bao gồm: Bắc (qua Bình Định – Quảng Ngãi), Tây Bắc (qua Tây Nguyên), Đông Nam (qua Sài Gòn – Gia Định), Đông (qua Cửu Long), và Tây thoại (qua vùng Tây Nam).',
-    'Cuộc tổng công kích nhằm vào chính quyền Dinh Độc Lập tại Sài Gòn.',
-    'Đúng lúc 11:30 trưa ngày 30 tháng 4 năm 1975, lá cờ Giải phóng tung bay trên nóc Dinh Độc Lập.',
-    'Sự kiện lá cờ Giải phóng tung bay trên nóc Dinh Độc Lập đánh dấu sự sụp đổ hoàn toàn chính quyền Việt Nam Cộng Hòa tại Sài Gòn.',
-    'Sự kiện lá cờ Giải phóng tung bay trên nóc Dinh Độc Lập kết thúc 30 năm chiến tranh.',
-    'Sự kiện lá cờ Giải phóng tung bay trên nóc Dinh Độc Lập chấm dứt chế độ chia cắt đất nước.',
-    'Ngày 25 tháng 4 năm 1976, trên toàn quốc diễn ra cuộc Tổng tuyển cử bầu Quốc hội khóa VI cho cả nước thống nhất.',
-    'Ngày 2 tháng 7 năm 1976 Quốc hội khóa VI quyết định đổi tên nước thành Cộng hòa xã hội chủ nghĩa Việt Nam.'
-]
-
-
-def get_events_from_claim(target_claim, context_claims, config=config, verbose=False):
+def get_events_from_claim(target_claim, context_claims, config, verbose=False):
     llm = LLM(config)
     text_events = llm(
         EVENT_IDENTIFICATION_SYSTEM_PROMPT,
@@ -56,7 +40,7 @@ def get_events_from_claim(target_claim, context_claims, config=config, verbose=F
     return extract_json_from_text(text_events, verbose)
 
 
-def get_event_attributes(target_events, target_claim, context_claims, config=config, verbose=False):
+def get_event_attributes(target_events, target_claim, context_claims, config, verbose=False):
     llm = LLM(config)
     text_event_attributes = llm(
         EVENT_ATTRIBUTE_SYSTEM_PROMPT,
@@ -75,7 +59,7 @@ def event2triplets(event):
     return participant_triplets + time_triplet + location_triplet
 
 
-def get_events_from_claims(claims, config=config, verbose=False):
+def get_events_from_claims(claims, config, verbose=False):
     output_events = []
     llm = LLM(config)
     
@@ -106,7 +90,7 @@ def get_events_from_claims(claims, config=config, verbose=False):
     return output_events
 
 
-def infer_within_chunk_event_relations(event_triples, config=config, verbose=False):
+def infer_within_chunk_event_relations(event_triples, config, verbose=False):
     llm = LLM(config)
     within_chunk_relations = llm(
         WITHIN_CHUNK_EVENT_RELATION_SYSTEM_PROMPT,
@@ -115,7 +99,7 @@ def infer_within_chunk_event_relations(event_triples, config=config, verbose=Fal
     return extract_json_from_text(within_chunk_relations, verbose)
 
 
-def resolve_events_with_llm(triples, config=config, verbose=False):
+def resolve_events_with_llm(triples, config, verbose=False):
     def get_event_content(event):
         if not event or not event.startswith("EVENT"):
             return ""
@@ -238,7 +222,7 @@ def identify_event_communities(event_graph):
     return communities
 
 
-def infer_within_event_community_relations(triples, communities, config=config, verbose=False):
+def infer_within_event_community_relations(triples, communities, config, verbose=False):
     new_triples = []
     
     # Process larger communities
@@ -332,7 +316,7 @@ def infer_within_event_community_relations(triples, communities, config=config, 
     return new_triples
 
 
-def infer_between_event_community_relations(triples, communities, config=config, verbose=False):
+def infer_between_event_community_relations(triples, communities, config, verbose=False):
     if len(communities) <= 1:
         print("Only one community found, skipping LLM-based relationship inference")
         return []
@@ -422,7 +406,7 @@ def deduplicate_triples(triples):
     return list(unique_triples.values())
 
 
-def infer_event_relationships(triples, config=config, verbose=False):
+def infer_event_relationships(triples, config, verbose=False):
     event_graph, _ = build_event_graph(triples)
     communities = identify_event_communities(event_graph)
     print(f"Identified {len(communities)} disconnected event communities in the event graph")
@@ -473,7 +457,7 @@ def get_unique_entities(event_triples):
     return list(set(entities))
 
 
-def get_entity_relations(text, events, claims, config=config, verbose=False):
+def get_entity_relations(text, events, claims, config, verbose=False):
     entities = get_unique_entities(events)
     entity_relations = []
     llm = LLM(config)
