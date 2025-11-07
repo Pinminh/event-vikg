@@ -1,0 +1,27 @@
+[llm]
+api_key = "fill in with your API key here"     # replace this with your API key
+
+model = "gemini-2.0-flash"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+
+max_tokens = 4096
+temperature = 0.1
+
+[chunking]
+already_chunked = true  # this will disable default chunking with chunk_size and overlap
+chunk_size = 50         # Number of words per chunk
+overlap = 10            # Number of words to overlap between chunks
+
+[standardization]
+enabled = true               # Whether to enable entity standardization
+use_llm_for_entities = true  # Whether to use LLM for additional entity resolution
+
+[inference]
+enabled = false                 # Whether to enable cross-chunk inference (currently in dev, should not be enabled)
+use_llm_for_inference = true    # Whether to use LLM for relationship inference
+apply_transitive = false        # Whether to apply transitive inference rules (should not be used due to high imprecision)
+
+[visualization]
+# Options: false, "dynamic", "continuous", "discrete", "diagonalCross",
+# "straightCross", "horizontal", "vertical", "curvedCW", "curvedCCW", "cubicBezier": true = "continuous"
+edge_smooth = false

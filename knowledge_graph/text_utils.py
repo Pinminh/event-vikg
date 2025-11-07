@@ -1,8 +1,20 @@
 """
 Text processing utilities for the knowledge graph generator.
 """
+import re
 
-def chunk_text(text, chunk_size=500, overlap=50):
+def chunk_text(text, config):
+    """
+    Split the input text into a list of chunks separated by markers like [Đoạn i].
+    Each chunk corresponds to one paragraph.
+    """
+    if not config.get("chunking", {}).get("already_chunked", False):
+        return default_chunk_text(text, config)
+    chunks = re.split(r'\[Đoạn\s*\d+\]\s*', text)
+    chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
+    return chunks
+
+def default_chunk_text(text, config):
     """
     Split a text into chunks of words with overlap.
     
@@ -14,6 +26,9 @@ def chunk_text(text, chunk_size=500, overlap=50):
     Returns:
         List of text chunks
     """
+    chunk_size = config.get("chunking", {}).get("chunk_size", 500)
+    overlap = config.get("chunking", {}).get("overlap", 50)
+    
     # Split text into words
     words = text.split()
     

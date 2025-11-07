@@ -35,7 +35,7 @@ uv_env/
 # ==============================
 build/
 dist/
-# *.egg-info/
+*.egg-info/
 *.egg
 *.whl
 pip-wheel-metadata/
@@ -76,7 +76,7 @@ nosetests.xml
 # ==============================
 # Data, output, results directories
 # ==============================
-output/
+*output*/
 results/
 data/
 # If you have subfolders inside data that you *do* want to commit, you might 
@@ -124,6 +124,7 @@ models/
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
+run_log.txt
 
 # ==============================
 # Negations (exceptions) if needed

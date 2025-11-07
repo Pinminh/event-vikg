@@ -73,7 +73,8 @@ def visualize_knowledge_graph(triples, output_file="knowledge_graph.html", edge_
     G_undirected = nx.Graph()
     
     for triple in triples:
-        G_undirected.add_edge(triple["subject"], triple["object"])
+        if triple["subject"] and triple["object"]:
+            G_undirected.add_edge(triple["subject"], triple["object"])
     
     # Calculate centrality metrics
     centrality_metrics = _calculate_centrality_metrics(G_undirected, all_nodes)
@@ -92,6 +93,8 @@ def visualize_knowledge_graph(triples, output_file="knowledge_graph.html", edge_
     
     # Add nodes to the graph with community colors and sizes
     for node in all_nodes:
+        if not node:
+            continue
         community = node_communities[node]
         G.add_node(
             node, 
@@ -105,6 +108,9 @@ def visualize_knowledge_graph(triples, output_file="knowledge_graph.html", edge_
     for triple in triples:
         subject = triple["subject"]
         obj = triple["object"]
+        
+        if not subject or not obj:
+            continue
         
         # Determine if this is an inferred relationship
         is_inferred = triple.get("inferred", False)
@@ -196,6 +202,8 @@ def _detect_communities(G_undirected, all_nodes):
         # Fallback: assign community IDs based on degree for simplicity
         node_communities = {}
         for node in all_nodes:
+            if not node:
+                continue
             node_degree = G_undirected.degree(node) if node in G_undirected else 0
             # Ensure we have at least 0 as a community ID
             community_id = max(0, node_degree) % 8  # Using modulo 8 to limit number of colors
@@ -416,7 +424,7 @@ def sample_data_visualization(output_file="sample_knowledge_graph.html", edge_sm
 
 if __name__ == "__main__":
     # Run sample visualization when this module is run directly
-    from src.knowledge_graph.config import load_config
+    from knowledge_graph.config import load_config
     
     # Try to load config, fall back to defaults if not found
     config = load_config()
