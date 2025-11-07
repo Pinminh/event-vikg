@@ -378,7 +378,7 @@ def main():
     
     # # Provide command to open the visualization in a browser
     print("\nTo view the visualization, open the following file in your browser:")
-    print(f"file://{os.path.abspath(html_output)}")
+    print(f"file://{os.path.abspath(html_output)}".replace('\\', '/'))
     
     out_name = config["input_name"] + ".json"
     
