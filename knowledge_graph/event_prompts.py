@@ -14,7 +14,7 @@ Sự kiện là một hành động, quá trình, hoặc trạng thái xảy ra.
 NGUYÊN TẮC VỀ SỰ KIỆN:
 1. Mỗi ĐỘNG TỪ CHÍNH là 1 sự kiện duy nhất. Trong trường hợp câu phức trong tiếng Việt, hãy SUY NGHĨ từng bước và phân tích chính xác cấu trúc câu, để xác định các động từ chính để tách thành nhiều sự kiện.
 2. Mô tả (description) của sự kiện phải ngắn gọn, rõ ràng, và được viết thường toàn bộ. KHÔNG viết quá 15 từ tiếng Việt (từ đơn, từ láy, từ phức) trong mô tả. ĐẢM BẢO toàn bộ thực thể có trong sự kiện được viết tên đầy đủ, rõ ràng, không bị cắt xén.
-3. Không được thêm các thông tin như thời gian hay địa điểm cụ thể của sự kiện, vì các thông tin này sẽ trở thành các thực thể thời gian (time) và địa điểm (location) kết nối với sự kiện.
+3. KHÔNG ĐƯỢC thêm các thông tin như THỜI GIAN hay ĐỊA ĐIỂM cụ thể hay tương đối của sự kiện, vì các thông tin này sẽ trở thành các thực thể thời gian (time) và địa điểm (location) kết nối với sự kiện trong quá trình tiếp theo không liên quan tác vụ này.
 4. Các tên thực thể xuất hiện trong participants PHẢI ĐƯỢC ĐỀ CẬP ĐẦY ĐỦ trong description.
 5. KHÔNG ĐƯỢC thêm thông tin không có trong câu.
 
@@ -123,43 +123,44 @@ Bây giờ hãy xác định sự kiện:
 # ==================== EVENT ATTRIBUTES ====================
 
 EVENT_ATTRIBUTE_SYSTEM_PROMPT = """\
-Bạn là chuyên gia trích xuất thuộc tính sự kiện (event attributes) trong đồ thị tri thức (knowledge graph). Nhiệm vụ: trích xuất THỜI GIAN (TIME), ĐỊA ĐIỂM (LOCATION) tham gia cho mỗi sự kiện (event).
+Bạn là một hệ thống AI chuyên gia về xử lý ngôn ngữ tự nhiên, được tối ưu hóa cho việc xây dựng đồ thị tri thức (knowledge graph).
+NHIỆM VỤ: Trích xuất chính xác các thuộc tính THỜI GIAN (TIME) và ĐỊA ĐIỂM (LOCATION) **của** mỗi sự kiện (event) được cung cấp, dựa trên văn bản ngữ cảnh.
 
-CÁC LOẠI THUỘC TÍNH:
+### CÁC LOẠI THUỘC TÍNH
+1.  **THỜI GIAN (TIME)**: Bất kỳ thông tin nào xác định khi sự kiện xảy ra.
+    * **Thời điểm cụ thể**: "năm 1911", "ngày 15/3/2020", "lúc 8 giờ tối", "thế kỷ 18", "đêm ngày thứ ba của Tết"
+    * **Khoảng thời gian**: "từ 2010 đến 2015", "trong vòng 5 tháng", "suốt thập niên 90"
+    * **Thời gian tương đối**: "sau khi chiến tranh thế giới lần thứ nhất kết thúc", "trước cuộc họp", "cùng lúc với sự kiện A"
+    * **Giai đoạn/Thời kỳ**: "thời kỳ hậu chiến", "giai đoạn 1975-1986", "thời phong kiến"
+2.  **ĐỊA ĐIỂM (LOCATION)**: Bất kỳ thông tin nào xác định nơi sự kiện xảy ra.
+    * **Địa danh cụ thể**: "hà nội", "cảng nhà rồng", "sông Sài Gòn", "Dinh Độc Lập"
+    * **Vị trí tương đối**: "trước nhà", "trên đường", "bên trong tòa nhà", "cách Matxcơva 50km"
+    * **Khu vực/Vùng**: "miền bắc việt nam", "đồng bằng sông Cửu Long", "khu vực biên giới"
+    * **Cơ sở/Tổ chức (nếu là địa điểm vật lý)**: "tại trụ sở bộ ngoại giao", "trong Bệnh viện Chợ Rẫy"
 
-1. THỜI GIAN (TIME) có thể là:
-- Thời điểm cụ thể: "năm 1911", "ngày 15/3/2020", "đêm ngày thứ ba của Tết"
-- Khoảng thời gian: "từ 2010 đến 2015", "trong vòng 5 tháng"
-- Thời gian tương đối (ví dụ như so với sự kiện khác): "sau khi chiến tranh thế giới lần thứ nhất kết thúc"
+### QUY TẮC VÀNG (PHẢI TUÂN THỦ)
+1.  **BÁM SÁT VĂN BẢN (Grounding)**: CHỈ trích xuất thông tin CÓ MẶT trong "Ngữ cảnh" hoặc "Câu nhận định gốc". TUYỆT ĐỐI không suy diễn, không bổ sung kiến thức bên ngoài.
+2.  **CHÍNH XÁC (Precision)**: Trích xuất chính xác cụm từ chỉ thời gian và địa điểm liên quan TRỰC TIẾP đến sự kiện. KHÔNG trích xuất thông tin chung chung hoặc không liên quan.
+3.  **VIẾT THƯỜNG (Lowercase)**: Toàn bộ văn bản trích xuất được (cả time và location) phải được viết thường.
+4.  **MẶC ĐỊNH LÀ NULL (Default to Null)**: Nếu không tìm thấy thông tin THỜI GIAN hoặc ĐỊA ĐIỂM cho một sự kiện, BẮT BUỘC trả về `null` cho trường đó.
+5.  **SAO CHÉP TUYỆT ĐỐI (Exact Copy)**: Các trường "description" và "participants" trong file JSON đầu ra PHẢI được sao chép Y HỆT, từng ký tự, từ phần "CÁC SỰ KIỆN ĐÃ XÁC ĐỊNH" được cung cấp.
 
-2. ĐỊA ĐIỂM (LOCATION) có thể là:
-- Địa danh: "hà nội", "cảng nhà rồng"
-- Vị trí tương đối: "trước nhà", "trên đường", "trong tòa nhà lớn được xây từ năm 1955"
-- Khu vực: "miền bắc việt nam"
+### QUY TRÌNH SUY LUẬN TỪNG BƯỚC
+Hãy thực hiện theo quy trình sau:
+* **Bước 1. Phân tích Nguồn thông tin:** Đọc thật kỹ "CÂU NHẬN ĐỊNH GỐC" và "NGỮ CẢNH CÁC CÂU NHẬN ĐỊNH". Đây là nguồn duy nhất chứa thông tin TIME và LOCATION.
+* **Bước 2. Lặp qua từng Sự kiện:** Với MỖI sự kiện trong danh sách "CÁC SỰ KIỆN ĐÃ XÁC ĐỊNH":
+    * **Bước 3. Đối chiếu TIME:** Tìm trong văn bản (Bước 1) xem có cụm từ nào chỉ thời gian *liên quan trực tiếp* đến sự kiện này không?
+    * **Bước 4. Đối chiếu LOCATION:** Tìm trong văn bản (Bước 1) xem có cụm từ nào chỉ địa điểm *liên quan trực tiếp* đến sự kiện này không?
+    * **Bước 5. Áp dụng Bối cảnh chung (Rất quan trọng):**
+        * Nếu "Câu nhận định gốc" cung cấp một thời gian/địa điểm chung (ví dụ: "**Năm 1955**, A làm B **ở Sài Gòn**."), thì thời gian ("năm 1955") và địa điểm ("ở sài gòn") đó sẽ được áp dụng cho TẤT CẢ các sự kiện được trích xuất từ câu đó (ví dụ: sự kiện "a làm b" và sự kiện "a ở sài gòn").
+        * Đây là lý do tại sao trong ví dụ, "năm 1955" được áp dụng cho cả hai sự kiện.
+    * **Bước 6. Sàng lọc Phạm vi (Scoping):** Chỉ trích xuất địa điểm/thời gian NƠI/KHI sự kiện diễn ra.
+        * *Ví dụ:* "Ông A họp ở Hà Nội, sau đó bay vào TP.HCM."
+        * Nếu sự kiện là: `description: 'ông a họp'`, thì `location: "ở hà nội"`.
+        * Nếu sự kiện là: `description: 'ông a bay vào tp.hcm'`, thì `location: "vào tp.hcm"`.
+    * **Bước 7. Tổng hợp JSON:** Tạo đối tượng JSON cho sự kiện với các trường "description" và "participants" được SAO CHÉP CHÍNH XÁC, cùng với "time" và "location" đã xác định (hoặc `null`).
 
-NGUYÊN TẮC:
-- CHỈ trích xuất thông tin CÓ trong văn bản.
-- Nếu không có thông tin thời gian hay location, hãy trả về null.
-- Viết thường toàn bộ.
-- Giữ nguyên cách diễn đạt gốc.
-
-Hãy thực hiện việc trích xuất thuộc tính sự kiện theo từng bước:
-- Bước 1. Đọc thật kỹ ngữ cảnh liên quan đến sự kiện và câu nhận định gốc của sự kiện đó.
-- Bước 2. Từ các văn bản đọc được, xác định các thông tin thời gian và địa điểm của sự kiện ấy.
-- Bước 3. Trả về kết quả dưới dạng JSON có cấu trúc như sau:
-[
-    {
-        "description": "<sao chép description sự kiện vào đây>",
-        "participants": ["<sao chép thực thể 1 vào đây>", "<sao chép thực thể 2 vào đây>", ...],
-        "time": "<thời gian xác dịnh được>" hoặc null,
-        "location": "<địa điểm xác định được>" hoặc null
-    },
-    ...
-]
-
-LƯU Ý:
-- Các trường description và participants phải được sao chép chính xác từ đầu vào danh sách các sự kiện. TUYỆT ĐỐI không được sai khác.
-- Đầu ra là một danh sách định dạng JSON. Ngoài JSON ra, không được viết thêm bất kỳ thông tin, nhận xét, suy luận nào khác.
+* **Bước 8. Trả về Kết quả:** Trả về một danh sách (list) chứa tất cả các đối tượng JSON đã tạo. Ngoài danh sách JSON này, không viết thêm bất cứ thứ gì khác.
 """
 
 def get_event_attribute_user_prompt(events, claim, context):
@@ -167,45 +168,55 @@ def get_event_attribute_user_prompt(events, claim, context):
         f"{i + 1}. description: '{e['description']}', participants: {e['participants']}"
         for i, e in enumerate(events)
     ])
-    context = "\n".join(context)
+    context_text = "\n".join(context)
+    
     return f"""\
-NHIỆM VỤ: Trích xuất THỜI GIAN, ĐỊA ĐIỂM cho các sự kiện.
+YÊU CẦU: Dựa trên các quy tắc đã học, trích xuất THỜI GIAN và ĐỊA ĐIỂM cho các sự kiện bên dưới.
 
-CÁC SỰ KIỆN ĐÃ XÁC ĐỊNH:
-{events_text}
+---
+### NGUỒN THÔNG TIN (Dùng để trích xuất)
 
-NGỮ CẢNH CÁC CÂU NHẬN ĐỊNH:
-{context}
+**1. NGỮ CẢNH CÁC CÂU NHẬN ĐỊNH:**
+{context_text}
 
-CÂU NHẬN ĐỊNH GỐC:
+**2. CÂU NHẬN ĐỊNH GỐC:**
 {claim}
 
+---
+### MỤC TIÊU (Các sự kiện cần gán thuộc tính)
 
-VÍ DỤ:
+**CÁC SỰ KIỆN ĐÃ XÁC ĐỊNH:**
+{events_text}
 
-Câu: "Năm 1955, Ngô Đình Diệm đã gian lận để chiến thắng trong Cuộc trưng cầu dân ý miền Nam Việt Nam."
-Sự kiện trích xuất được:
-1. description: 'ngô đình diệm gian lận để chiến thắng trong cuộc trưng cầu dân ý miền nam việt nam', participants: ['ngô đình diệm', 'cuộc trưng cầu dân ý', 'miền nam việt nam']
-2. description: 'ngô đình diệm gian lận với sự trợ giúp của mỹ', participants: ['ngô đình diệm', 'mỹ']
+---
+### VÍ DỤ MINH HỌA
 
-Đầu ra:
+**Đầu vào (Giả định):**
+* Câu nhận định gốc: "Năm 1955, Ngô Đình Diệm đã gian lận để chiến thắng trong Cuộc trưng cầu dân ý miền Nam Việt Nam."
+* Sự kiện trích xuất được:
+    1. description: 'ngô đình diệm gian lận để chiến thắng trong cuộc trưng cầu dân ý miền nam việt nam', participants: ['ngô đình diệm', 'cuộc trưng cầu dân ý', 'miền nam việt nam']
+    2. description: 'ngô đình diệm gian lận với sự trợ giúp của mỹ', participants: ['ngô đình diệm', 'mỹ']
+
+**Đầu ra (Kết quả mong muốn):**
+(Lưu ý: "năm 1955" áp dụng cho cả hai sự kiện vì chúng cùng chung bối cảnh câu gốc. Không tìm thấy địa điểm).
 [
     {{
-        "description": "ngô đình diệm gian lận để chiến thắng trong cuộc trưng cầu dân ý miền nam việt nam"
+        "description": "ngô đình diệm gian lận để chiến thắng trong cuộc trưng cầu dân ý miền nam việt nam",
         "participants": ["ngô đình diệm", "cuộc trưng cầu dân ý", "miền nam việt nam"],
         "time": "năm 1955",
         "location": null
     }},
     {{
-        "description": "ngô đình diệm gian lận với sự trợ giúp của mỹ"
+        "description": "ngô đình diệm gian lận với sự trợ giúp của mỹ",
         "participants": ["ngô đình diệm", "mỹ"],
         "time": "năm 1955",
         "location": null
     }}
 ]
+---
 
-Ngoài cấu trúc JSON trên, TUYỆT ĐỐI KHÔNG viết thêm bất kỳ giải thích, suy luận, nhận xét, hay ký hiệu nào khác.
-Bây giờ đưa ra đáp án:
+**TUYỆT ĐỐI KHÔNG** viết thêm bất kỳ giải thích, suy luận, nhận xét, hay ký hiệu nào khác ngoài cấu trúc JSON được yêu cầu.
+Bắt đầu đưa ra đáp án:
 """
 
 
