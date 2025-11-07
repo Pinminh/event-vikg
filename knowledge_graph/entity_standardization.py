@@ -1,15 +1,18 @@
 """Entity standardization and relationship inference for knowledge graphs."""
 import re
+import json
 from collections import defaultdict
-from src.knowledge_graph.llm import call_llm
-from src.knowledge_graph.prompts import (
+from knowledge_graph.llm import LLM, extract_json_from_text
+
+from knowledge_graph.prompts import (
     ENTITY_RESOLUTION_SYSTEM_PROMPT, 
-    get_entity_resolution_user_prompt,
+    get_entity_resolution_with_context_prompt,
     RELATIONSHIP_INFERENCE_SYSTEM_PROMPT,
     get_relationship_inference_user_prompt,
     WITHIN_COMMUNITY_INFERENCE_SYSTEM_PROMPT,
     get_within_community_inference_user_prompt
 )
+
 
 def limit_predicate_length(predicate, max_words=6):
     """
@@ -73,36 +76,29 @@ def standardize_entities(triples, config):
         return []
     
     # 1. Extract all unique entities
+    def get_entity_content(entity):
+        if not entity or not entity.startswith("ENTITY|"):
+            return ""
+        return entity.split("|", 1)[-1].strip().lower()
+    
     all_entities = set()
     for triple in valid_triples:
-        all_entities.add(triple["subject"].lower())
-        if triple["object"] is not None:
-            all_entities.add(triple["object"].lower())
+        subj, obj = get_entity_content(triple["subject"]), get_entity_content(triple["object"])
+        if subj:
+            all_entities.add(subj)
+        if obj:
+            all_entities.add(obj)
     
     # 2. Group similar entities - first by exact match after lowercasing and removing stopwords
     standardized_entities = {}
     entity_groups = defaultdict(list)
-    
-    # Helper function to normalize text for comparison
-    def normalize_text(text):
-        # Convert to lowercase
-        text = text.lower()
-        # Remove common stopwords that might appear in entity names
-        with open('vietnamese-stopwords.txt', 'r', encoding='utf-8') as file:
-            stopwords = file.read().splitlines()
-        words = [word for word in re.findall(r'\b\w+\b', text) if word not in stopwords]
-        return " ".join(words)
     
     # Process entities in order of complexity (longer entities first)
     sorted_entities = sorted(all_entities, key=lambda x: (-len(x), x))
     
     # First pass: Standard normalization
     for entity in sorted_entities:
-        # normalized = normalize_text(entity)
-        # if normalized:  # Skip empty strings
-            entity_groups[entity].append(entity)
-
-    # print(entity_groups)
+        entity_groups[entity].append(entity)
     
     # 3. For each group, choose the most representative name
     for group_key, variants in entity_groups.items():
@@ -114,10 +110,11 @@ def standardize_entities(triples, config):
             # Sort by frequency in triples, then by length (shorter is better)
             variant_counts = defaultdict(int)
             for triple in valid_triples:
+                subj, obj = get_entity_content(triple["subject"]), get_entity_content(triple["object"])
                 for variant in variants:
-                    if triple["subject"].lower() == variant:
+                    if subj and subj == variant:
                         variant_counts[variant] += 1
-                    if triple["object"].lower() == variant:
+                    if obj and obj == variant:
                         variant_counts[variant] += 1
             
             # Choose the most common variant as the standard form
@@ -133,54 +130,21 @@ def standardize_entities(triples, config):
     standard_forms = set(standardized_entities.values())
     sorted_standards = sorted(standard_forms, key=len)
     
-    # for i, entity1 in enumerate(sorted_standards):
-    #     e1_words = set(entity1.split())
-        
-    #     for entity2 in sorted_standards[i+1:]:
-    #         if entity1 == entity2:
-    #             continue
-                
-    #         # Check if one entity is a subset of the other
-    #         e2_words = set(entity2.split())
-            
-    #         # If one entity contains all words from the other
-    #         if e1_words.issubset(e2_words) and len(e1_words) > 0:
-    #             # The shorter one is likely the more general concept
-    #             additional_standardizations[entity2] = entity1
-    #         elif e2_words.issubset(e1_words) and len(e2_words) > 0:
-    #             additional_standardizations[entity1] = entity2
-    #         else:
-    #             # Check for stemming/root similarities
-    #             stems1 = {word[:4] for word in e1_words if len(word) > 4}
-    #             stems2 = {word[:4] for word in e2_words if len(word) > 4}
-                
-    #             shared_stems = stems1.intersection(stems2)
-                
-    #             if shared_stems and (len(shared_stems) / max(len(stems1), len(stems2))) > 0.5:
-    #                 # Use the shorter entity as the standard
-    #                 if len(entity1) <= len(entity2):
-    #                     additional_standardizations[entity2] = entity1
-    #                 else:
-    #                     additional_standardizations[entity1] = entity2
-    
-    # Apply additional standardizations
-    # for entity, standard in additional_standardizations.items():
-    #     standardized_entities[entity] = standard
-    
     # 5. Apply standardization to all triples
     standardized_triples = []
     for triple in valid_triples:
-        subj_lower = triple["subject"].lower()
-        obj_lower = triple["object"].lower() if triple["object"] is not None else None
+        subj_lower = get_entity_content(triple["subject"])
+        obj_lower = get_entity_content(triple["object"])
+
+        final_subj = "ENTITY|" + standardized_entities.get(subj_lower, subj_lower) if subj_lower else triple["subject"]
+        final_obj = "ENTITY|" + standardized_entities.get(obj_lower, obj_lower) if obj_lower else triple["object"]
         
         standardized_triple = {
-            "subject": standardized_entities.get(subj_lower, triple["subject"]),
+            "subject": final_subj,
             "predicate": limit_predicate_length(triple["predicate"]),
-            "object": standardized_entities.get(obj_lower, triple["object"]) if obj_lower else triple["object"],
-            "location": triple["location"],
-            "time": triple["time"],
-            "chunk": triple.get("chunk", 0),
-            "claim": triple.get("claim", ""),
+            "object": final_obj,
+            "chunk": triple.get("chunk", None),
+            "claim": triple.get("claim", None),
         }
         standardized_triples.append(standardized_triple)
     
@@ -338,7 +302,6 @@ def _apply_transitive_inference(triples, graph):
     Returns:
         List of new inferred triples
     """
-    return []
     new_triples = []
     
     # Predicates by subject-object pairs
@@ -403,65 +366,53 @@ def _resolve_entities_with_llm(triples, config):
         List of triples with LLM-assisted entity standardization
     """
     # Extract all unique entities
+    def get_entity_content(entity):
+        if not entity or not entity.startswith("ENTITY|"):
+            return ""
+        return entity.split("|", 1)[-1].strip().lower()
+    
     all_entities = set()
     for triple in triples:
-        all_entities.add(triple["subject"])
-        if triple["object"] is not None:
-            all_entities.add(triple["object"])
+        subj, obj = get_entity_content(triple["subject"]), get_entity_content(triple["object"])
+        if subj:
+            all_entities.add(subj)
+        if obj:
+            all_entities.add(obj)
     
     # If there are too many entities, limit to the most frequent ones
     entity_counts = defaultdict(int)
     for triple in triples:
-        entity_counts[triple["subject"]] += 1
-        if triple["object"] is not None:
-            entity_counts[triple["object"]] += 1
+        subj, obj = get_entity_content(triple["subject"]), get_entity_content(triple["object"])
+        if subj:
+            entity_counts[get_entity_content(triple["subject"])] += 1
+        if obj:
+            entity_counts[get_entity_content(triple["object"])] += 1
     
-    if len(all_entities) > 100:
-        # Keep only the top 100 most frequent entities
-        all_entities = {entity for entity, count in 
-                       sorted(entity_counts.items(), key=lambda x: -x[1])[:100]}
+    if len(all_entities) > 200:
+        # Keep only the top 200 most frequent entities
+        all_entities = {entity for entity, count in sorted(entity_counts.items(), key=lambda x: -x[1])[:200]}
     
-    # ===== CODE MỚI (CÓ CONTEXT) - ĐANG BẬT =====
     # Prepare triples context (limit to most relevant ones)
-    context_triples = sorted(triples, key=lambda t: entity_counts[t["subject"]], reverse=True)[:50]
+    context_triples = sorted(triples, key=lambda t: entity_counts[t["subject"]], reverse=True)[:200]
     triples_text = "\n".join([
-        f"- {t['subject']} {t['predicate']} {t['object']} {t['location']} {t['time']} (từ: \"{t.get('claim', '')}\")"
+        f"- {t['subject']} {t['predicate']} {t['object']}"
         for t in context_triples if t["object"] is not None
     ])
     
     # Prepare prompt for LLM WITH CONTEXT
     entity_list = "\n".join(sorted(all_entities))
-    system_prompt = ENTITY_RESOLUTION_SYSTEM_PROMPT
-    
-    # Import the new prompt function
-    from src.knowledge_graph.prompts import get_entity_resolution_with_context_prompt
-    user_prompt = get_entity_resolution_with_context_prompt(triples_text, entity_list)
-    
-    # ===== CODE CŨ (KHÔNG CÓ CONTEXT) - Đã tắt =====
-    # # Prepare prompt for LLM WITHOUT CONTEXT (old version)
-    # entity_list = "\n".join(sorted(all_entities))
-    # system_prompt = ENTITY_RESOLUTION_SYSTEM_PROMPT
-    # 
-    # from src.knowledge_graph.prompts import get_entity_resolution_user_prompt
-    # user_prompt = get_entity_resolution_user_prompt(entity_list)
     
     try:
-        # LLM configuration
-        model = config["llm"]["model"]
-        api_key = config["llm"]["api_key"]
-        max_tokens = config["llm"]["max_tokens"]
-        temperature = config["llm"]["temperature"]
-        base_url = config["llm"]["base_url"]
-        
         # Call LLM
-        response = call_llm(model, user_prompt, api_key, system_prompt, max_tokens, temperature, base_url)
+        llm = LLM(config)
+        response = llm(
+            ENTITY_RESOLUTION_SYSTEM_PROMPT,
+            get_entity_resolution_with_context_prompt(triples_text, entity_list)
+        )
         
-        # Extract JSON mapping
-        import json
-        from src.knowledge_graph.llm import extract_json_from_text
-        
+        # Extract JSON mapping 
         entity_mapping = extract_json_from_text(response)
-        print("Entity mapping from LLM:", entity_mapping)
+        print("Entity mapping from LLM:\n", "\n".join([f"- {k}: {v}" for k, v in entity_mapping.items()]))
         
         if entity_mapping and isinstance(entity_mapping, dict):
             # Apply the mapping to standardize entities
@@ -474,8 +425,9 @@ def _resolve_entities_with_llm(triples, config):
             
             # Apply standardization to triples
             for triple in triples:
-                triple["subject"] = entity_to_standard.get(triple["subject"], triple["subject"])
-                triple["object"] = entity_to_standard.get(triple["object"], triple["object"])
+                subj, obj = get_entity_content(triple["subject"]), get_entity_content(triple["object"])
+                triple["subject"] = "ENTITY|" + entity_to_standard.get(subj, subj) if subj else triple["subject"]
+                triple["object"] = "ENTITY|" + entity_to_standard.get(obj, obj) if obj else triple["object"]
                 
             print(f"Applied LLM-based entity standardization for {len(entity_mapping)} entity groups")
         else:
@@ -531,7 +483,7 @@ def _infer_relationships_with_llm(triples, communities, config):
             
             # Convert triples to text for prompt
             triples_text = "\n".join([
-                f"{t['subject']} {t['predicate']} {t['object']} {t['location']} {t['time']}"
+                f"{t['subject']} {t['predicate']} {t['object']}"
                 for t in context_triples
             ])
             
@@ -539,23 +491,15 @@ def _infer_relationships_with_llm(triples, communities, config):
             entities1 = ", ".join(rep1)
             entities2 = ", ".join(rep2)
             
-            # Create prompt for LLM
-            system_prompt = RELATIONSHIP_INFERENCE_SYSTEM_PROMPT
-            user_prompt = get_relationship_inference_user_prompt(entities1, entities2, triples_text)
-            
             try:
-                # LLM configuration
-                model = config["llm"]["model"]
-                api_key = config["llm"]["api_key"]
-                max_tokens = config["llm"]["max_tokens"]
-                temperature = config["llm"]["temperature"]
-                base_url = config["llm"]["base_url"]
-                
                 # Call LLM
-                response = call_llm(model, user_prompt, api_key, system_prompt, max_tokens, temperature, base_url)
+                llm = LLM(config)
+                response = llm(
+                    RELATIONSHIP_INFERENCE_SYSTEM_PROMPT,
+                    get_relationship_inference_user_prompt(entities1, entities2, triples_text),
+                )
                 
                 # Extract JSON results
-                from src.knowledge_graph.llm import extract_json_from_text
                 inferred_triples = extract_json_from_text(response)
                 
                 if inferred_triples and isinstance(inferred_triples, list):
@@ -646,30 +590,22 @@ def _infer_within_community_relationships(triples, communities, config):
             
         # Convert triples to text for prompt
         triples_text = "\n".join([
-            f"{t['subject']} {t['predicate']} {t['object']} {t['location']} {t['time']}"
+            f"{t['subject']} {t['predicate']} {t['object']}"
             for t in context_triples
         ])
         
         # Create pairs text
-        pairs_text = "\n".join([f"{a} and {b}" for a, b in disconnected_pairs])
-        
-        # Create prompt for LLM
-        system_prompt = WITHIN_COMMUNITY_INFERENCE_SYSTEM_PROMPT
-        user_prompt = get_within_community_inference_user_prompt(pairs_text, triples_text)
+        pairs_text = "\n".join([f"{a} và {b}" for a, b in disconnected_pairs])
         
         try:
-            # LLM configuration
-            model = config["llm"]["model"]
-            api_key = config["llm"]["api_key"]
-            max_tokens = config["llm"]["max_tokens"]
-            temperature = config["llm"]["temperature"]
-            base_url = config["llm"]["base_url"]
-            
             # Call LLM
-            response = call_llm(model, user_prompt, api_key, system_prompt, max_tokens, temperature, base_url)
+            llm = LLM(config)
+            response = llm(
+                WITHIN_COMMUNITY_INFERENCE_SYSTEM_PROMPT,
+                get_within_community_inference_user_prompt(pairs_text, triples_text),
+            )
             
             # Extract JSON results
-            from src.knowledge_graph.llm import extract_json_from_text
             inferred_triples = extract_json_from_text(response)
             
             if inferred_triples and isinstance(inferred_triples, list):
@@ -704,6 +640,7 @@ def _infer_relationships_by_lexical_similarity(entities, triples):
     Returns:
         List of new inferred triples
     """
+    return []
     new_triples = []
     processed_pairs = set()
     
@@ -749,8 +686,6 @@ def _infer_relationships_by_lexical_similarity(entities, triples):
                             "subject": entity2,
                             "predicate": "liên quan",
                             "object": entity1,
-                            "location": None,
-                            "time": None,
                             "inferred": True,
                         })
                     elif e2_lower.startswith(main_shared) and not e1_lower.startswith(main_shared):
@@ -758,8 +693,6 @@ def _infer_relationships_by_lexical_similarity(entities, triples):
                             "subject": entity1,
                             "predicate": "liên quan",
                             "object": entity2,
-                            "location": None,
-                            "time": None,
                             "inferred": True,
                         })
                     else:
@@ -767,30 +700,8 @@ def _infer_relationships_by_lexical_similarity(entities, triples):
                             "subject": entity1,
                             "predicate": "liên quan",
                             "object": entity2,
-                            "location": None,
-                            "time": None,
                             "inferred": True,
                         })
-            
-            # Check if one entity contains the other
-            # elif e1_lower in e2_lower:
-            #     new_triples.append({
-            #         "subject": entity2,
-            #         "predicate": "là một loại",
-            #         "object": entity1,
-            #         "location": None,
-            #         "time": None,
-            #         "inferred": True,
-            #     })
-            # elif e2_lower in e1_lower:
-            #     new_triples.append({
-            #         "subject": entity1,
-            #         "predicate": "là một loại",
-            #         "object": entity2,
-            #         "location": None,
-            #         "time": None,
-            #         "inferred": True,
-            #     })
     
     print(f"Inferred {len(new_triples)} relationships based on lexical similarity")
     return new_triples 
