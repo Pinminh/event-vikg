@@ -253,6 +253,14 @@ NGUYÊN TẮC QUAN TRỌNG:
 - KHÔNG phán đoán hoặc suy luận quá mức
 - KHÔNG tạo cả CAUSE và PRECEDE cho cùng một cặp sự kiện
 - HÃY SUY NGHĨ TỪNG BƯỚC THẬT CẨN THẨN ĐỂ ĐƯA RA CÁC MỐI LIÊN HỆ CHÍNH XÁC NHẤT CÓ THỂ.
+
+QUY TẮC QUAN TRỌNG VỀ ĐỊNH DẠNG ĐẦU RA JSON:
+1. Chỉ Mảng JSON: Toàn bộ đầu ra BẮT BUỘC phải là một mảng JSON duy nhất, bắt đầu bằng `[` và kết thúc bằng `]`.
+2. Không Có Văn Bản Thừa: KHÔNG bao gồm bất kỳ văn bản hội thoại, giải thích, lời xin lỗi hoặc bất kỳ văn bản nào khác trước dấu `[` mở đầu hoặc sau dấu `]` đóng lại.
+3. Dấu Ngoặc Kép: Tất cả các khóa (key) và giá trị chuỗi (string) BẮT BUỘC phải được đặt trong dấu ngoặc kép (`"`).
+4. Không Có Dấu Phẩy Thừa: Đảm bảo không có dấu phẩy thừa (trailing comma) sau cặp khóa-giá trị cuối cùng trong một đối tượng hoặc sau đối tượng cuối cùng trong mảng.
+5. Ký Tự Escape: Escape (thoát) đúng cách mọi ký tự đặc biệt (như `"` hoặc `\\n`) bên trong các giá trị chuỗi.
+6. Cấu trúc: Tuân thủ nghiêm ngặt cấu trúc được chỉ định trong các ví dụ đã cho.
 """
 
 def get_within_chunk_event_relation_user_prompt(triplets):
@@ -361,6 +369,14 @@ LƯU Ý QUAN TRỌNG:
 - Cố gắng KHÔNG hợp nhất những mô tả sự kiện mà có thông tin khác nhau, ĐẢM BẢO KHÔNG MẤT THÔNG TIN
 - Hãy suy nghĩ từng bước thật kỹ lưỡng để đảm bảo không thay đổi ngữ nghĩa sự kiện, không làm mất bất kỳ thông tin nào, đảm bảo chất lượng và độ chính xác cao nhất
 
+QUY TẮC QUAN TRỌNG VỀ ĐỊNH DẠNG ĐẦU RA JSON:
+1. Chỉ Mảng JSON: Toàn bộ đầu ra BẮT BUỘC phải là một mảng JSON duy nhất, bắt đầu bằng `[` và kết thúc bằng `]`.
+2. Không Có Văn Bản Thừa: KHÔNG bao gồm bất kỳ văn bản hội thoại, giải thích, lời xin lỗi hoặc bất kỳ văn bản nào khác trước dấu `[` mở đầu hoặc sau dấu `]` đóng lại.
+3. Dấu Ngoặc Kép: Tất cả các khóa (key) và giá trị chuỗi (string) BẮT BUỘC phải được đặt trong dấu ngoặc kép (`"`).
+4. Không Có Dấu Phẩy Thừa: Đảm bảo không có dấu phẩy thừa (trailing comma) sau cặp khóa-giá trị cuối cùng trong một đối tượng hoặc sau đối tượng cuối cùng trong mảng.
+5. Ký Tự Escape: Escape (thoát) đúng cách mọi ký tự đặc biệt (như `"` hoặc `\\n`) bên trong các giá trị chuỗi.
+6. Cấu trúc: Tuân thủ nghiêm ngặt cấu trúc được chỉ định trong các ví dụ đã cho.
+
 Trả về JSON mapping:
 {{
     "sự kiện chuẩn hóa đầy đủ": ["biến thể sự kiện 1", "biến thể sự kiện 2", ...],
@@ -415,6 +431,14 @@ QUAN TRỌNG:
 - Đảm bảo chủ ngữ, vị ngữ (subject, object) là các sự kiện khác nhau, tránh việc tự tham chiếu (tham chiếu bản thân).
 - TUYỆT ĐỐI không được sửa nội dung sự kiện, viết lại nguyên văn các tên "EVENT|nội dung sự kiện", KHÔNG thêm sự kiện bên ngoài vào.
 - HÃY SUY NGHĨ TỪNG BƯỚC THẬT CẨN THẨN ĐỂ HIỂU RÕ NGỮ CẢNH VÀ NGỮ NGHĨA NHẰM CHO RA KẾT QUẢ CHÍNH XÁC NHẤT CÓ THỂ.
+
+QUY TẮC QUAN TRỌNG VỀ ĐỊNH DẠNG ĐẦU RA JSON:
+1. Chỉ Mảng JSON: Toàn bộ đầu ra BẮT BUỘC phải là một mảng JSON duy nhất, bắt đầu bằng `[` và kết thúc bằng `]`.
+2. Không Có Văn Bản Thừa: KHÔNG bao gồm bất kỳ văn bản hội thoại, giải thích, lời xin lỗi hoặc bất kỳ văn bản nào khác trước dấu `[` mở đầu hoặc sau dấu `]` đóng lại.
+3. Dấu Ngoặc Kép: Tất cả các khóa (key) và giá trị chuỗi (string) BẮT BUỘC phải được đặt trong dấu ngoặc kép (`"`).
+4. Không Có Dấu Phẩy Thừa: Đảm bảo không có dấu phẩy thừa (trailing comma) sau cặp khóa-giá trị cuối cùng trong một đối tượng hoặc sau đối tượng cuối cùng trong mảng.
+5. Ký Tự Escape: Escape (thoát) đúng cách mọi ký tự đặc biệt (như `"` hoặc `\\n`) bên trong các giá trị chuỗi.
+6. Cấu trúc: Tuân thủ nghiêm ngặt cấu trúc được chỉ định trong các ví dụ đã cho.
 """
 
 
@@ -453,6 +477,14 @@ QUAN TRỌNG:
 - TUYỆT ĐỐI không để trống hoặc viết giá trị null vào các trường chủ ngữ (subject), vị ngữ (predicate), và tân ngữ (object).
 - Các mối liên hệ suy luận được TUYỆT ĐỐI chỉ thuộc 1 trong 3 giá trị: PRECEDE, CO_OCCUR, CAUSE như đã miêu tả.
 - Đảm bảo chủ ngữ, vị ngữ (subject, object) là các sự kiện khác nhau, tránh việc tự tham chiếu (tham chiếu bản thân).
+
+QUY TẮC QUAN TRỌNG VỀ ĐỊNH DẠNG ĐẦU RA JSON:
+1. Chỉ Mảng JSON: Toàn bộ đầu ra BẮT BUỘC phải là một mảng JSON duy nhất, bắt đầu bằng `[` và kết thúc bằng `]`.
+2. Không Có Văn Bản Thừa: KHÔNG bao gồm bất kỳ văn bản hội thoại, giải thích, lời xin lỗi hoặc bất kỳ văn bản nào khác trước dấu `[` mở đầu hoặc sau dấu `]` đóng lại.
+3. Dấu Ngoặc Kép: Tất cả các khóa (key) và giá trị chuỗi (string) BẮT BUỘC phải được đặt trong dấu ngoặc kép (`"`).
+4. Không Có Dấu Phẩy Thừa: Đảm bảo không có dấu phẩy thừa (trailing comma) sau cặp khóa-giá trị cuối cùng trong một đối tượng hoặc sau đối tượng cuối cùng trong mảng.
+5. Ký Tự Escape: Escape (thoát) đúng cách mọi ký tự đặc biệt (như `"` hoặc `\\n`) bên trong các giá trị chuỗi.
+6. Cấu trúc: Tuân thủ nghiêm ngặt cấu trúc được chỉ định trong các ví dụ đã cho.
 """
 
 
@@ -509,6 +541,14 @@ Lưu ý QUAN TRỌNG:
 - Không dùng các từ trừu tượng hoặc placeholder chung chung như "hành động", "sự kiện", "hiện tượng"... mà không có thực thể cụ thể. Hãy chỉ rõ hành động hoặc sự kiện cụ thể trong ngữ cảnh. Nếu không xác định được, dùng cụm danh từ mang nghĩa mô tả nội dung thật (vd: "tăng trưởng dân số", "mở rộng đô thị"...) thay vì từ chung chung. Mục tiêu: mỗi triplet phải cụ thể, có thể hiểu độc lập, không mơ hồ.
 - Có thể sử dụng giá trị null phù hợp với các cấu trúc câu không có đủ các thành phần subject, object, tuy nhiên predicate là trường bắt buộc phải có. Hãy suy nghĩ thật kỹ theo từng bước khi đánh giá cấu trúc câu, tuyệt đối không để sai sót xảy ra (ví dụ sai sót: không điền subject hoặc subject vì cấu trúc câu không có subject hoặc object mặc dù có thể dễ dàng suy luận ra được).
 - PHẢI SUY NGHĨ THEO TỪNG BƯỚC để phân tích cấu trúc câu phức tạp, từ đó xác định rõ đâu là mệnh đề chính và mệnh đề phụ, cuối cùng là trích xuất các bộ 3 có thể có từ cấu trúc câu đã hiểu rõ.
+
+QUY TẮC QUAN TRỌNG VỀ ĐỊNH DẠNG ĐẦU RA JSON:
+1. Chỉ Mảng JSON: Toàn bộ đầu ra BẮT BUỘC phải là một mảng JSON duy nhất, bắt đầu bằng `[` và kết thúc bằng `]`.
+2. Không Có Văn Bản Thừa: KHÔNG bao gồm bất kỳ văn bản hội thoại, giải thích, lời xin lỗi hoặc bất kỳ văn bản nào khác trước dấu `[` mở đầu hoặc sau dấu `]` đóng lại.
+3. Dấu Ngoặc Kép: Tất cả các khóa (key) và giá trị chuỗi (string) BẮT BUỘC phải được đặt trong dấu ngoặc kép (`"`).
+4. Không Có Dấu Phẩy Thừa: Đảm bảo không có dấu phẩy thừa (trailing comma) sau cặp khóa-giá trị cuối cùng trong một đối tượng hoặc sau đối tượng cuối cùng trong mảng.
+5. Ký Tự Escape: Escape (thoát) đúng cách mọi ký tự đặc biệt (như `"` hoặc `\\n`) bên trong các giá trị chuỗi.
+6. Cấu trúc: Tuân thủ nghiêm ngặt cấu trúc được chỉ định trong các ví dụ đã cho.
 
 Dựa trên vai trò và các quy tắc nghiêm ngặt đã được hướng dẫn, hãy trích xuất các bộ 3 từ các văn bản, bên dưới là một số ví dụ minh họa.
 
