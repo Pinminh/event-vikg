@@ -140,7 +140,8 @@ def process_text_in_chunks(config, full_text, debug=False):
     
     # Split text into chunks
     text_chunks = chunk_text(full_text, config)
-    print(text_chunks)
+    print("\n".join(f"[Đoạn {i + 1}]\n{txt}" for i, txt in enumerate(text_chunks)))
+    
     chunking_info = f"size: {chunk_size} words, overlap: {overlap} words" if not already_chunked else "pre-chunked"
     print("=" * 50)
     print("PHASE 1: INITIAL EVENT-ENTITY TRIPLE EXTRACTION")

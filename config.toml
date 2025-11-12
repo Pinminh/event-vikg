@@ -1,5 +1,11 @@
 [llm]
-api_key = "fill in with your API key here"     # replace this with your API key
+api_key = [
+    "fill in with your API key 1 here",
+    "fill in with your API key 2 here",
+    "fill in with your API key 3 here",
+]
+
+key_cooldown_time = 30
 
 model = "gemini-2.0-flash"
 base_url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
